@@ -1,5 +1,5 @@
 <script setup lang="ts">
-useHead({ htmlAttrs: { lang: 'en' }, link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }] })
+useHead({ htmlAttrs: { lang: 'en' }, link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg?v=2' }] })
 useSeoMeta({ title: 'Personal Finance', description: 'Explore home ownership, credit card rewards, and income taxes in one place.' })
 const route = useRoute()
 const links = [
@@ -22,10 +22,7 @@ function isActive(to: string) {
             to="/"
             class="flex items-center gap-3 font-semibold tracking-tight text-highlighted"
           >
-            <span class="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><UIcon
-              name="i-lucide-chart-no-axes-combined"
-              class="size-6"
-            /></span>
+            <AppLogo />
             Personal Finance
           </NuxtLink>
           <UColorModeButton />
