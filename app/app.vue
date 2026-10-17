@@ -60,7 +60,17 @@ function isActive(to: string) {
       <footer class="mt-8 border-t border-default py-6">
         <UContainer class="space-y-2 text-center text-xs leading-5 text-muted">
           <p>Calculations are estimates for planning purposes. Tax rules, card offers, and financial assumptions can change. Check current terms before making decisions. Results are not guaranteed to be accurate or complete and should not be relied upon as financial, tax, or legal advice. Please consult a qualified professional before making financial decisions.</p>
-          <p>Copyright &copy; {{ new Date().getFullYear() }} Upamanyu Pathare. Licensed under the GNU Affero General Public License v3.0.</p>
+          <p>
+            Copyright &copy; {{ new Date().getFullYear() }} Upamanyu Pathare. Licensed under the GNU Affero General Public License v3.0.
+            <a
+              href="https://github.com/upathare1/PersonalFinanceApp"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-medium text-primary hover:underline"
+            >
+              Source code on GitHub.
+            </a>
+          </p>
         </UContainer>
       </footer>
     </div>
