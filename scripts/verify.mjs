@@ -121,6 +121,42 @@ try {
   const noCityOnMa = await post('/api/taxes', { taxState: 'MA', nycResident: true, income: { wageIncome: 100000 } })
   assert.equal((await noCityOnMa.json()).cityTax, 0)
   assert.deepEqual(await newYorkResult(undefined), await newYorkResult(2026))
+  const comparisonScenario = {
+    taxYear: 2027,
+    taxState: 'NY',
+    nycResident: true,
+    income: { wageIncome: 170000, taxableBenefits: 2500, interestIncome: 2000 },
+    adjustments: { retirement401kContributions: 12000, healthInsurancePayments: 3000 },
+    hsaBreakdown: { employeeContributions: 1800, employerContributions: 500 },
+    optionalDeductions: { mortgageInterest: 14000, stateTaxesWithholding: 800, massachusettsRent: 3000 }
+  }
+  const calculatorResponse = await post('/api/taxes', comparisonScenario)
+  const comparisonResponse = await post('/api/taxes/compare', comparisonScenario)
+  assert.equal(calculatorResponse.status, 200)
+  assert.equal(comparisonResponse.status, 200)
+  const calculator = await calculatorResponse.json()
+  const comparison = await comparisonResponse.json()
+  const currentLocation = comparison.rows.find(row => row.isCalculatorLocation)
+  assert.equal(currentLocation.id, 'NYC')
+  assert.equal(currentLocation.netIncome, calculator.netIncome, 'Current location preserves the calculator result')
+  assert.deepEqual(comparison.rows.filter(row => row.provisional).map(row => row.id), ['MA', 'CA'])
+  assert.equal(comparison.rows.length, 4)
+  for (const row of comparison.rows) {
+    assert.equal(row.incomeExcludingBenefits, 172000)
+    assert.equal(row.hsa, 1800)
+    assert.ok(Math.abs(row.incomeExcludingBenefits - row.totalTax - row.retirement - row.hsa - row.insurance - row.netIncome) < 0.01)
+  }
+  const nyOutsideCity = comparison.rows.find(row => row.id === 'NY')
+  assert.equal(nyOutsideCity.cityTax, 0)
+  const otherLocationResponse = await post('/api/taxes', {
+    ...comparisonScenario,
+    nycResident: false,
+    optionalDeductions: { ...comparisonScenario.optionalDeductions, stateTaxesWithholding: Math.round(nyOutsideCity.stateTax * 100) / 100 }
+  })
+  assert.equal((await otherLocationResponse.json()).netIncome, nyOutsideCity.netIncome, 'Other locations estimate their own withholding')
+  const lowIncomeResponse = await post('/api/taxes/compare', { taxState: 'NY', nycResident: true, income: { wageIncome: 8000 } })
+  const lowIncomeNyc = (await lowIncomeResponse.json()).rows.find(row => row.id === 'NYC')
+  assert.equal(lowIncomeNyc.cityTax, -63, 'Refundable NYC credits remain signed')
   console.log('Passed: calculator routes, mortgage and credit calculations, and 2025–2027 federal, state, and payroll tax defaults and overrides.')
 } finally {
   const exited = once(server, 'exit')

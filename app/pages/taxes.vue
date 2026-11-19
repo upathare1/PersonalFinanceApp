@@ -399,6 +399,12 @@ const optionalDeductionTotalPlaceholder = computed(() => {
   return mortgageInterest + propertyTaxes + stateTaxesWithholding + investmentExpenses + applicableRent + carryOverCapitalLoss
 })
 
+const activeTaxView = ref('calculator')
+const taxViews = [
+  { label: 'Calculator', value: 'calculator', slot: 'calculator', icon: 'i-lucide-calculator' },
+  { label: 'Compare', value: 'compare', slot: 'compare', icon: 'i-lucide-chart-bar' }
+]
+
 const calculationPayload = computed<CalculationPayload>(() => ({
   taxYear: selectedYear.value,
   taxState: selectedState.value,
@@ -597,955 +603,978 @@ const importInputs = async (event: Event) => {
 
 <template>
   <UContainer class="py-8 sm:py-10">
-    <div class="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-      <div class="max-w-4xl">
-        <h1 class="text-3xl font-semibold tracking-normal text-highlighted sm:text-4xl">
-          Income Tax Calculator
-        </h1>
-
-        <p class="mt-3 text-base leading-7 text-muted">
-          To estimate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator assumes a "Single" filing status for a full-year resident of {{ selectedStateName }}.
-        </p>
-      </div>
-
-      <div class="grid w-full shrink-0 grid-cols-2 gap-3 sm:w-80">
-        <UFormField
-          label="Tax year"
-          name="taxYear"
-        >
-          <USelect
-            v-model="selectedYear"
-            :items="yearOptions"
-            value-key="value"
-            size="xl"
-            class="w-full"
-            aria-label="Tax year"
-          />
-        </UFormField>
-
-        <UFormField
-          label="State of residence"
-          name="taxState"
-        >
-          <USelect
-            v-model="selectedState"
-            :items="stateOptions"
-            value-key="value"
-            size="xl"
-            class="w-full"
-            aria-label="State of residence"
-          />
-        </UFormField>
-      </div>
-    </div>
-
-    <section
-      v-if="selectedState === 'NY'"
-      class="mb-6 space-y-4 rounded-lg border border-default p-5"
-      aria-label="New York residency and adjustments"
+    <UTabs
+      v-model="activeTaxView"
+      :items="taxViews"
+      :unmount-on-hide="false"
+      size="md"
+      color="primary"
+      :ui="{
+        root: 'items-start gap-6',
+        list: 'w-fit gap-0.5 rounded-lg border border-default bg-muted',
+        trigger: 'min-h-9 text-xs font-semibold data-[state=active]:text-primary sm:text-sm',
+        leadingIcon: 'size-4',
+        indicator: 'bg-default ring ring-default'
+      }"
     >
-      <UCheckbox
-        v-model="nycResident"
-        label="Full-year New York City resident"
-        description="Adds NYC resident income tax. Working in NYC alone does not make you a city resident."
-      />
-      <p class="text-sm leading-6 text-muted">
-        Estimates assume a single filer who cannot be claimed as a dependent. Includes state tax-benefit recapture, household credits, and NYC school-tax credits. Other credits, Yonkers taxes, and self-employment MCTMT are not modeled.
-      </p>
-      <details>
-        <summary class="cursor-pointer text-sm font-medium text-primary">
-          New York income adjustments and itemized deductions
-        </summary>
-        <div class="mt-4 grid gap-4 sm:grid-cols-3">
-          <UFormField
-            v-for="field in newYorkFields"
-            :key="field.key"
-            :label="field.label"
-            :description="field.description"
-          >
-            <UInput
-              :model-value="formatNumberInput(newYorkInputs[field.key])"
-              inputmode="decimal"
-              class="w-full"
-              :aria-label="field.label"
-              @update:model-value="newYorkInputs[field.key] = parseNumberInput($event)"
-            />
-          </UFormField>
+      <template #calculator>
+        <div class="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div class="max-w-4xl">
+            <h1 class="text-3xl font-semibold tracking-normal text-highlighted sm:text-4xl">
+              Income Tax Calculator
+            </h1>
+
+            <p class="mt-3 text-base leading-7 text-muted">
+              To estimate your net income and state and federal taxes, enter income, contributions, and deductions amounts below. The tax calculator assumes a "Single" filing status for a full-year resident of {{ selectedStateName }}.
+            </p>
+          </div>
+
+          <div class="grid w-full shrink-0 grid-cols-2 gap-3 sm:w-80">
+            <UFormField
+              label="Tax year"
+              name="taxYear"
+            >
+              <USelect
+                v-model="selectedYear"
+                :items="yearOptions"
+                value-key="value"
+                size="xl"
+                class="w-full"
+                aria-label="Tax year"
+              />
+            </UFormField>
+
+            <UFormField
+              label="State of residence"
+              name="taxState"
+            >
+              <USelect
+                v-model="selectedState"
+                :items="stateOptions"
+                value-key="value"
+                size="xl"
+                class="w-full"
+                aria-label="State of residence"
+              />
+            </UFormField>
+          </div>
         </div>
-      </details>
-    </section>
 
-    <UAlert
-      v-if="selectedState !== 'NY' && stateRulesYear !== selectedYear"
-      class="mb-6"
-      color="warning"
-      variant="soft"
-      icon="i-lucide-info"
-      :title="`Provisional ${selectedYear} state estimate`"
-      :description="selectedState === 'MA'
-        ? `The Massachusetts surtax threshold defaults to the ${stateRulesYear} amount until the ${selectedYear} threshold is published. You can override it in Advanced Configurations.`
-        : `California uses ${stateRulesYear} brackets, the standard deduction, and the exemption credit until ${selectedYear} figures are published.`"
-    />
-
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div class="space-y-6">
-        <section class="rounded-lg border border-default bg-default">
-          <div class="border-b border-default px-5 py-4 sm:px-6">
-            <h2 class="text-lg font-semibold text-highlighted">
-              Income Details
-            </h2>
-          </div>
-
-          <div class="divide-y divide-default">
-            <div
-              v-for="input in incomeInputs"
-              :key="input.key"
-              class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
-            >
-              <div class="flex gap-3">
-                <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <UIcon
-                    :name="input.icon"
-                    class="size-5"
-                  />
-                </div>
-
-                <div>
-                  <UFormField
-                    :label="input.label"
-                    :name="input.key"
-                    class="[&>label]:text-base [&>label]:font-semibold"
-                  >
-                    <p class="mt-1 text-sm leading-6 text-muted">
-                      {{ input.description }}
-                      <template v-if="input.examples?.length">
-                        Examples:
-                        <span
-                          v-for="(example, index) in input.examples"
-                          :key="example"
-                        >
-                          {{ example }}{{ index === input.examples.length - 1 ? '.' : ', ' }}
-                        </span>
-                      </template>
-                    </p>
-                  </UFormField>
-                </div>
-              </div>
-
-              <UInput
-                :model-value="formatNumberInput(income[input.key])"
-                type="text"
-                :min="0"
-                :step="100"
-                inputmode="decimal"
-                placeholder="0"
-                icon="i-lucide-dollar-sign"
-                size="xl"
-                class="w-full"
-                @update:model-value="income[input.key] = parseNumberInput($event)"
-              />
-
-              <div
-                v-if="input.key === 'interestIncome'"
-                class="sm:col-span-2"
+        <section
+          v-if="selectedState === 'NY'"
+          class="mb-6 space-y-4 rounded-lg border border-default p-5"
+          aria-label="New York residency and adjustments"
+        >
+          <UCheckbox
+            v-model="nycResident"
+            label="Full-year New York City resident"
+            description="Adds NYC resident income tax. Working in NYC alone does not make you a city resident."
+          />
+          <p class="text-sm leading-6 text-muted">
+            Estimates assume a single filer who cannot be claimed as a dependent. Includes state tax-benefit recapture, household credits, and NYC school-tax credits. Other credits, Yonkers taxes, and self-employment MCTMT are not modeled.
+          </p>
+          <details>
+            <summary class="cursor-pointer text-sm font-medium text-primary">
+              New York income adjustments and itemized deductions
+            </summary>
+            <div class="mt-4 grid gap-4 sm:grid-cols-3">
+              <UFormField
+                v-for="field in newYorkFields"
+                :key="field.key"
+                :label="field.label"
+                :description="field.description"
               >
-                <UButton
-                  :icon="interestBreakdownExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  class="px-0"
-                  :label="interestBreakdownExpanded ? 'Hide interest breakdown' : 'Show interest breakdown'"
-                  @click="interestBreakdownExpanded = !interestBreakdownExpanded"
+                <UInput
+                  :model-value="formatNumberInput(newYorkInputs[field.key])"
+                  inputmode="decimal"
+                  class="w-full"
+                  :aria-label="field.label"
+                  @update:model-value="newYorkInputs[field.key] = parseNumberInput($event)"
                 />
-
-                <div
-                  v-if="interestBreakdownExpanded"
-                  class="mt-3 grid gap-3 rounded-lg border border-default bg-muted/30 p-4 sm:grid-cols-2"
-                >
-                  <UFormField
-                    :label="`${selectedStateName} Tax Exempt`"
-                    name="stateTaxExemptInterest"
-                  >
-                    <UInput
-                      :model-value="formatNumberInput(stateTaxExemptInterest)"
-                      type="text"
-                      :min="0"
-                      :max="interestIncomeTotal"
-                      :step="100"
-                      inputmode="decimal"
-                      placeholder="0"
-                      icon="i-lucide-dollar-sign"
-                      class="w-full"
-                      @update:model-value="stateTaxExemptInterest = parseNumberInput($event)"
-                    />
-                  </UFormField>
-
-                  <UFormField
-                    :label="`Not ${selectedStateName} Tax Exempt`"
-                    name="notStateTaxExemptInterest"
-                  >
-                    <UInput
-                      :model-value="formatNumberInput(notStateTaxExemptInterest)"
-                      type="text"
-                      :min="0"
-                      :max="interestIncomeTotal"
-                      :step="100"
-                      inputmode="decimal"
-                      placeholder="0"
-                      icon="i-lucide-dollar-sign"
-                      class="w-full"
-                      @update:model-value="notStateTaxExemptInterest = parseNumberInput($event)"
-                    />
-                  </UFormField>
-
-                  <p class="text-sm text-muted sm:col-span-2">
-                    Breakdown total: {{ formatCurrency(stateTaxExemptInterest + notStateTaxExemptInterest) }}
-                  </p>
-                </div>
-              </div>
+              </UFormField>
             </div>
-          </div>
+          </details>
         </section>
 
-        <section class="rounded-lg border border-default bg-default">
-          <div class="border-b border-default px-5 py-4 sm:px-6">
-            <h2 class="text-lg font-semibold text-highlighted">
-              Adjustments & Contributions
-            </h2>
-          </div>
+        <UAlert
+          v-if="selectedState !== 'NY' && stateRulesYear !== selectedYear"
+          class="mb-6"
+          color="warning"
+          variant="soft"
+          icon="i-lucide-info"
+          :title="`Provisional ${selectedYear} state estimate`"
+          :description="selectedState === 'MA'
+            ? `The Massachusetts surtax threshold defaults to the ${stateRulesYear} amount until the ${selectedYear} threshold is published. You can override it in Advanced Configurations.`
+            : `California uses ${stateRulesYear} brackets, the standard deduction, and the exemption credit until ${selectedYear} figures are published.`"
+        />
 
-          <div class="divide-y divide-default">
-            <div
-              v-for="input in adjustmentInputs"
-              :key="input.key"
-              class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
-            >
-              <div class="flex gap-3">
-                <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-info/10 text-info">
-                  <UIcon
-                    :name="input.icon"
-                    class="size-5"
-                  />
-                </div>
-
-                <div>
-                  <UFormField
-                    :label="input.label"
-                    :name="input.key"
-                    class="[&>label]:text-base [&>label]:font-semibold"
-                  >
-                    <p class="mt-1 text-sm leading-6 text-muted">
-                      {{ input.description }}
-                    </p>
-                  </UFormField>
-                </div>
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div class="space-y-6">
+            <section class="rounded-lg border border-default bg-default">
+              <div class="border-b border-default px-5 py-4 sm:px-6">
+                <h2 class="text-lg font-semibold text-highlighted">
+                  Income Details
+                </h2>
               </div>
 
-              <UInput
-                :model-value="formatNumberInput(adjustments[input.key])"
-                type="text"
-                :min="0"
-                :step="100"
-                inputmode="decimal"
-                placeholder="0"
-                icon="i-lucide-dollar-sign"
-                size="xl"
-                class="w-full"
-                @update:model-value="adjustments[input.key] = parseNumberInput($event)"
-              />
-
-              <div
-                v-if="input.key === 'hsaContributions'"
-                class="sm:col-span-2"
-              >
-                <UButton
-                  :icon="hsaBreakdownExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  class="px-0"
-                  :label="hsaBreakdownExpanded ? 'Hide HSA breakdown' : 'Show HSA breakdown'"
-                  @click="hsaBreakdownExpanded = !hsaBreakdownExpanded"
-                />
-
+              <div class="divide-y divide-default">
                 <div
-                  v-if="hsaBreakdownExpanded"
-                  class="mt-3 grid gap-3 rounded-lg border border-default bg-muted/30 p-4 sm:grid-cols-2"
+                  v-for="input in incomeInputs"
+                  :key="input.key"
+                  class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
                 >
-                  <UFormField
-                    label="Employee Contributions"
-                    name="hsaEmployeeContributions"
-                  >
-                    <UInput
-                      :model-value="formatNumberInput(hsaEmployeeContributionAmount)"
-                      type="text"
-                      :min="0"
-                      :max="hsaContributionTotal"
-                      :step="100"
-                      inputmode="decimal"
-                      placeholder="0"
-                      icon="i-lucide-dollar-sign"
-                      class="w-full"
-                      @update:model-value="hsaEmployeeContributionAmount = parseNumberInput($event)"
-                    />
-                  </UFormField>
+                  <div class="flex gap-3">
+                    <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <UIcon
+                        :name="input.icon"
+                        class="size-5"
+                      />
+                    </div>
 
-                  <UFormField
-                    label="Employer Contributions"
-                    name="hsaEmployerContributions"
-                  >
-                    <UInput
-                      :model-value="formatNumberInput(hsaEmployerContributionAmount)"
-                      type="text"
-                      :min="0"
-                      :max="hsaContributionTotal"
-                      :step="100"
-                      inputmode="decimal"
-                      placeholder="0"
-                      icon="i-lucide-dollar-sign"
-                      class="w-full"
-                      @update:model-value="hsaEmployerContributionAmount = parseNumberInput($event)"
-                    />
-                  </UFormField>
-
-                  <p class="text-sm text-muted sm:col-span-2">
-                    Breakdown total: {{ formatCurrency(hsaEmployeeContributionAmount + hsaEmployerContributionAmount) }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="rounded-lg border border-default bg-default">
-          <button
-            type="button"
-            class="flex w-full items-center justify-between gap-3 border-b border-default px-5 py-4 text-left sm:px-6"
-            @click="optionalDeductionsExpanded = !optionalDeductionsExpanded"
-          >
-            <span>
-              <span class="block text-lg font-semibold text-highlighted">
-                Optional Deductions
-              </span>
-              <span class="mt-1 block text-sm text-muted">
-                {{ formatCurrency(optionalDeductionTotalPlaceholder) }} currently entered
-              </span>
-            </span>
-
-            <UIcon
-              :name="optionalDeductionsExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              class="size-5 shrink-0 text-muted"
-            />
-          </button>
-
-          <div
-            v-if="optionalDeductionsExpanded"
-            class="divide-y divide-default"
-          >
-            <template
-              v-for="input in optionalDeductionInputs"
-              :key="input.key"
-            >
-              <div
-                v-if="input.key !== 'massachusettsRent' || selectedState === 'MA'"
-                class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
-              >
-                <div class="flex gap-3">
-                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
-                    <UIcon
-                      :name="input.icon"
-                      class="size-5"
-                    />
+                    <div>
+                      <UFormField
+                        :label="input.label"
+                        :name="input.key"
+                        class="[&>label]:text-base [&>label]:font-semibold"
+                      >
+                        <p class="mt-1 text-sm leading-6 text-muted">
+                          {{ input.description }}
+                          <template v-if="input.examples?.length">
+                            Examples:
+                            <span
+                              v-for="(example, index) in input.examples"
+                              :key="example"
+                            >
+                              {{ example }}{{ index === input.examples.length - 1 ? '.' : ', ' }}
+                            </span>
+                          </template>
+                        </p>
+                      </UFormField>
+                    </div>
                   </div>
 
-                  <div>
-                    <UFormField
-                      :label="input.label"
-                      :name="input.key"
-                      class="[&>label]:text-base [&>label]:font-semibold"
+                  <UInput
+                    :model-value="formatNumberInput(income[input.key])"
+                    type="text"
+                    :min="0"
+                    :step="100"
+                    inputmode="decimal"
+                    placeholder="0"
+                    icon="i-lucide-dollar-sign"
+                    size="xl"
+                    class="w-full"
+                    @update:model-value="income[input.key] = parseNumberInput($event)"
+                  />
+
+                  <div
+                    v-if="input.key === 'interestIncome'"
+                    class="sm:col-span-2"
+                  >
+                    <UButton
+                      :icon="interestBreakdownExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                      color="neutral"
+                      variant="ghost"
+                      size="sm"
+                      class="px-0"
+                      :label="interestBreakdownExpanded ? 'Hide interest breakdown' : 'Show interest breakdown'"
+                      @click="interestBreakdownExpanded = !interestBreakdownExpanded"
+                    />
+
+                    <div
+                      v-if="interestBreakdownExpanded"
+                      class="mt-3 grid gap-3 rounded-lg border border-default bg-muted/30 p-4 sm:grid-cols-2"
                     >
-                      <template #label>
-                        <span class="inline-flex items-center gap-1">
-                          {{ input.label }}
-                          <UTooltip
-                            v-if="input.tooltip"
-                            :text="input.tooltip"
-                            :ui="{
-                              content: 'max-w-[min(20rem,calc(100vw-2rem))] h-auto',
-                              text: 'whitespace-normal overflow-visible text-clip break-words'
-                            }"
-                          >
+                      <UFormField
+                        :label="`${selectedStateName} Tax Exempt`"
+                        name="stateTaxExemptInterest"
+                      >
+                        <UInput
+                          :model-value="formatNumberInput(stateTaxExemptInterest)"
+                          type="text"
+                          :min="0"
+                          :max="interestIncomeTotal"
+                          :step="100"
+                          inputmode="decimal"
+                          placeholder="0"
+                          icon="i-lucide-dollar-sign"
+                          class="w-full"
+                          @update:model-value="stateTaxExemptInterest = parseNumberInput($event)"
+                        />
+                      </UFormField>
+
+                      <UFormField
+                        :label="`Not ${selectedStateName} Tax Exempt`"
+                        name="notStateTaxExemptInterest"
+                      >
+                        <UInput
+                          :model-value="formatNumberInput(notStateTaxExemptInterest)"
+                          type="text"
+                          :min="0"
+                          :max="interestIncomeTotal"
+                          :step="100"
+                          inputmode="decimal"
+                          placeholder="0"
+                          icon="i-lucide-dollar-sign"
+                          class="w-full"
+                          @update:model-value="notStateTaxExemptInterest = parseNumberInput($event)"
+                        />
+                      </UFormField>
+
+                      <p class="text-sm text-muted sm:col-span-2">
+                        Breakdown total: {{ formatCurrency(stateTaxExemptInterest + notStateTaxExemptInterest) }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-lg border border-default bg-default">
+              <div class="border-b border-default px-5 py-4 sm:px-6">
+                <h2 class="text-lg font-semibold text-highlighted">
+                  Adjustments & Contributions
+                </h2>
+              </div>
+
+              <div class="divide-y divide-default">
+                <div
+                  v-for="input in adjustmentInputs"
+                  :key="input.key"
+                  class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
+                >
+                  <div class="flex gap-3">
+                    <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-info/10 text-info">
+                      <UIcon
+                        :name="input.icon"
+                        class="size-5"
+                      />
+                    </div>
+
+                    <div>
+                      <UFormField
+                        :label="input.label"
+                        :name="input.key"
+                        class="[&>label]:text-base [&>label]:font-semibold"
+                      >
+                        <p class="mt-1 text-sm leading-6 text-muted">
+                          {{ input.description }}
+                        </p>
+                      </UFormField>
+                    </div>
+                  </div>
+
+                  <UInput
+                    :model-value="formatNumberInput(adjustments[input.key])"
+                    type="text"
+                    :min="0"
+                    :step="100"
+                    inputmode="decimal"
+                    placeholder="0"
+                    icon="i-lucide-dollar-sign"
+                    size="xl"
+                    class="w-full"
+                    @update:model-value="adjustments[input.key] = parseNumberInput($event)"
+                  />
+
+                  <div
+                    v-if="input.key === 'hsaContributions'"
+                    class="sm:col-span-2"
+                  >
+                    <UButton
+                      :icon="hsaBreakdownExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                      color="neutral"
+                      variant="ghost"
+                      size="sm"
+                      class="px-0"
+                      :label="hsaBreakdownExpanded ? 'Hide HSA breakdown' : 'Show HSA breakdown'"
+                      @click="hsaBreakdownExpanded = !hsaBreakdownExpanded"
+                    />
+
+                    <div
+                      v-if="hsaBreakdownExpanded"
+                      class="mt-3 grid gap-3 rounded-lg border border-default bg-muted/30 p-4 sm:grid-cols-2"
+                    >
+                      <UFormField
+                        label="Employee Contributions"
+                        name="hsaEmployeeContributions"
+                      >
+                        <UInput
+                          :model-value="formatNumberInput(hsaEmployeeContributionAmount)"
+                          type="text"
+                          :min="0"
+                          :max="hsaContributionTotal"
+                          :step="100"
+                          inputmode="decimal"
+                          placeholder="0"
+                          icon="i-lucide-dollar-sign"
+                          class="w-full"
+                          @update:model-value="hsaEmployeeContributionAmount = parseNumberInput($event)"
+                        />
+                      </UFormField>
+
+                      <UFormField
+                        label="Employer Contributions"
+                        name="hsaEmployerContributions"
+                      >
+                        <UInput
+                          :model-value="formatNumberInput(hsaEmployerContributionAmount)"
+                          type="text"
+                          :min="0"
+                          :max="hsaContributionTotal"
+                          :step="100"
+                          inputmode="decimal"
+                          placeholder="0"
+                          icon="i-lucide-dollar-sign"
+                          class="w-full"
+                          @update:model-value="hsaEmployerContributionAmount = parseNumberInput($event)"
+                        />
+                      </UFormField>
+
+                      <p class="text-sm text-muted sm:col-span-2">
+                        Breakdown total: {{ formatCurrency(hsaEmployeeContributionAmount + hsaEmployerContributionAmount) }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-lg border border-default bg-default">
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 border-b border-default px-5 py-4 text-left sm:px-6"
+                @click="optionalDeductionsExpanded = !optionalDeductionsExpanded"
+              >
+                <span>
+                  <span class="block text-lg font-semibold text-highlighted">
+                    Optional Deductions
+                  </span>
+                  <span class="mt-1 block text-sm text-muted">
+                    {{ formatCurrency(optionalDeductionTotalPlaceholder) }} currently entered
+                  </span>
+                </span>
+
+                <UIcon
+                  :name="optionalDeductionsExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                  class="size-5 shrink-0 text-muted"
+                />
+              </button>
+
+              <div
+                v-if="optionalDeductionsExpanded"
+                class="divide-y divide-default"
+              >
+                <template
+                  v-for="input in optionalDeductionInputs"
+                  :key="input.key"
+                >
+                  <div
+                    v-if="input.key !== 'massachusettsRent' || selectedState === 'MA'"
+                    class="grid gap-4 px-5 py-5 sm:grid-cols-[1fr_240px] sm:items-center sm:px-6"
+                  >
+                    <div class="flex gap-3">
+                      <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
+                        <UIcon
+                          :name="input.icon"
+                          class="size-5"
+                        />
+                      </div>
+
+                      <div>
+                        <UFormField
+                          :label="input.label"
+                          :name="input.key"
+                          class="[&>label]:text-base [&>label]:font-semibold"
+                        >
+                          <template #label>
+                            <span class="inline-flex items-center gap-1">
+                              {{ input.label }}
+                              <UTooltip
+                                v-if="input.tooltip"
+                                :text="input.tooltip"
+                                :ui="{
+                                  content: 'max-w-[min(20rem,calc(100vw-2rem))] h-auto',
+                                  text: 'whitespace-normal overflow-visible text-clip break-words'
+                                }"
+                              >
+                                <UButton
+                                  icon="i-lucide-circle-help"
+                                  color="neutral"
+                                  variant="ghost"
+                                  size="xs"
+                                  class="size-5 shrink-0 p-0"
+                                  :aria-label="`${input.label} description`"
+                                />
+                              </UTooltip>
+                            </span>
+                          </template>
+                          <p class="mt-1 text-sm leading-6 text-muted">
+                            {{ input.description }}
+                          </p>
+                        </UFormField>
+                      </div>
+                    </div>
+
+                    <UInput
+                      :model-value="formatNumberInput(optionalDeductions[input.key])"
+                      type="text"
+                      :min="0"
+                      :step="100"
+                      inputmode="decimal"
+                      placeholder="0"
+                      icon="i-lucide-dollar-sign"
+                      size="xl"
+                      class="w-full"
+                      @update:model-value="optionalDeductions[input.key] = parseNumberInput($event)"
+                    />
+                  </div>
+                </template>
+              </div>
+            </section>
+
+            <section class="rounded-lg border border-default bg-default">
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 border-b border-default px-5 py-4 text-left sm:px-6"
+                @click="calculatorAssumptionsExpanded = !calculatorAssumptionsExpanded"
+              >
+                <span>
+                  <span class="block text-lg font-semibold text-highlighted">
+                    Advanced Configurations
+                  </span>
+                  <span class="mt-1 block text-sm text-muted">
+                    Federal brackets, standard deduction, Social Security wage base<span v-if="selectedState === 'MA'">, and Massachusetts surtax floor</span>
+                  </span>
+                </span>
+
+                <UIcon
+                  :name="calculatorAssumptionsExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                  class="size-5 shrink-0 text-muted"
+                />
+              </button>
+
+              <div
+                v-if="calculatorAssumptionsExpanded"
+                class="space-y-6 px-5 py-5 sm:px-6"
+              >
+                <div class="grid gap-4 md:grid-cols-3">
+                  <UFormField
+                    label="Federal Standard Deduction"
+                    name="federalStandardDeduction"
+                    class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
+                  >
+                    <UInput
+                      :model-value="formatNumberInput(calculatorConfig.federalStandardDeduction)"
+                      type="text"
+                      :min="0"
+                      :step="100"
+                      inputmode="decimal"
+                      icon="i-lucide-dollar-sign"
+                      class="w-full"
+                      @update:model-value="calculatorConfig.federalStandardDeduction = parseNumberInput($event)"
+                    />
+                  </UFormField>
+
+                  <UFormField
+                    v-if="selectedState === 'MA'"
+                    label="Massachusetts Surtax Floor"
+                    name="massachusettsSurtaxFloor"
+                    class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
+                  >
+                    <UInput
+                      :model-value="formatNumberInput(calculatorConfig.massachusettsSurtaxFloor)"
+                      type="text"
+                      :min="0"
+                      :step="1000"
+                      inputmode="decimal"
+                      icon="i-lucide-dollar-sign"
+                      class="w-full"
+                      @update:model-value="calculatorConfig.massachusettsSurtaxFloor = parseNumberInput($event)"
+                    />
+                  </UFormField>
+
+                  <UFormField
+                    label="Social Security Wage Ceiling"
+                    name="socialSecurityMaximumTaxableWage"
+                    class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
+                  >
+                    <UInput
+                      :model-value="formatNumberInput(calculatorConfig.socialSecurityMaximumTaxableWage)"
+                      type="text"
+                      :min="0"
+                      :step="100"
+                      inputmode="decimal"
+                      icon="i-lucide-dollar-sign"
+                      class="w-full"
+                      @update:model-value="calculatorConfig.socialSecurityMaximumTaxableWage = parseNumberInput($event)"
+                    />
+                  </UFormField>
+                </div>
+
+                <div>
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-highlighted">
+                      {{ selectedYear }} Federal Tax Brackets
+                    </h3>
+
+                    <div class="flex items-center gap-2">
+                      <UButton
+                        label="Reset to year defaults"
+                        icon="i-lucide-rotate-ccw"
+                        color="neutral"
+                        variant="ghost"
+                        size="sm"
+                        @click="resetCalculatorConfig"
+                      />
+
+                      <UButton
+                        label="Add Bracket"
+                        icon="i-lucide-plus"
+                        color="neutral"
+                        variant="subtle"
+                        size="sm"
+                        @click="addFederalTaxBracket"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="overflow-x-auto">
+                    <table class="w-full min-w-[640px] text-left text-sm">
+                      <thead class="border-b border-default text-muted">
+                        <tr>
+                          <th class="py-2 pr-3 font-medium">
+                            From
+                          </th>
+                          <th class="px-3 py-2 font-medium">
+                            To
+                          </th>
+                          <th class="px-3 py-2 font-medium">
+                            Rate %
+                          </th>
+                          <th class="py-2 pl-3 text-right font-medium">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody class="divide-y divide-default">
+                        <tr
+                          v-for="(bracket, index) in calculatorConfig.federalTaxBrackets"
+                          :key="index"
+                        >
+                          <td class="py-3 pr-3">
+                            <UInput
+                              :model-value="formatNumberInput(bracket.from)"
+                              type="text"
+                              :min="0"
+                              :step="100"
+                              inputmode="decimal"
+                              icon="i-lucide-dollar-sign"
+                              class="w-full"
+                              @update:model-value="bracket.from = parseNumberInput($event)"
+                            />
+                          </td>
+
+                          <td class="px-3 py-3">
+                            <UInput
+                              :model-value="bracket.to === undefined ? '' : formatNumberInput(bracket.to)"
+                              type="text"
+                              :min="0"
+                              :step="100"
+                              inputmode="decimal"
+                              placeholder="No cap"
+                              icon="i-lucide-dollar-sign"
+                              class="w-full"
+                              @update:model-value="bracket.to = parseOptionalNumberInput($event)"
+                            />
+                          </td>
+
+                          <td class="px-3 py-3">
+                            <UInput
+                              v-model.number="bracket.ratePercent"
+                              type="number"
+                              :min="0"
+                              :step="0.01"
+                              inputmode="decimal"
+                              class="w-full"
+                            />
+                          </td>
+
+                          <td class="py-3 pl-3 text-right">
                             <UButton
-                              icon="i-lucide-circle-help"
+                              icon="i-lucide-trash-2"
                               color="neutral"
                               variant="ghost"
-                              size="xs"
-                              class="size-5 shrink-0 p-0"
-                              :aria-label="`${input.label} description`"
+                              size="sm"
+                              aria-label="Remove federal tax bracket"
+                              :disabled="calculatorConfig.federalTaxBrackets.length <= 1"
+                              @click="removeFederalTaxBracket(index)"
                             />
-                          </UTooltip>
-                        </span>
-                      </template>
-                      <p class="mt-1 text-sm leading-6 text-muted">
-                        {{ input.description }}
-                      </p>
-                    </UFormField>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+              </div>
+            </section>
+          </div>
 
-                <UInput
-                  :model-value="formatNumberInput(optionalDeductions[input.key])"
-                  type="text"
-                  :min="0"
-                  :step="100"
-                  inputmode="decimal"
-                  placeholder="0"
-                  icon="i-lucide-dollar-sign"
-                  size="xl"
-                  class="w-full"
-                  @update:model-value="optionalDeductions[input.key] = parseNumberInput($event)"
+          <aside class="space-y-4">
+            <section class="rounded-lg border border-default bg-default p-5">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="text-lg font-semibold text-highlighted">
+                  Load & Save Calculator Inputs
+                </h2>
+
+                <UIcon
+                  name="i-lucide-file-json"
+                  class="size-5 text-muted"
                 />
               </div>
-            </template>
-          </div>
-        </section>
 
-        <section class="rounded-lg border border-default bg-default">
-          <button
-            type="button"
-            class="flex w-full items-center justify-between gap-3 border-b border-default px-5 py-4 text-left sm:px-6"
-            @click="calculatorAssumptionsExpanded = !calculatorAssumptionsExpanded"
-          >
-            <span>
-              <span class="block text-lg font-semibold text-highlighted">
-                Advanced Configurations
-              </span>
-              <span class="mt-1 block text-sm text-muted">
-                Federal brackets, standard deduction, Social Security wage base<span v-if="selectedState === 'MA'">, and Massachusetts surtax floor</span>
-              </span>
-            </span>
-
-            <UIcon
-              :name="calculatorAssumptionsExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              class="size-5 shrink-0 text-muted"
-            />
-          </button>
-
-          <div
-            v-if="calculatorAssumptionsExpanded"
-            class="space-y-6 px-5 py-5 sm:px-6"
-          >
-            <div class="grid gap-4 md:grid-cols-3">
-              <UFormField
-                label="Federal Standard Deduction"
-                name="federalStandardDeduction"
-                class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
-              >
-                <UInput
-                  :model-value="formatNumberInput(calculatorConfig.federalStandardDeduction)"
-                  type="text"
-                  :min="0"
-                  :step="100"
-                  inputmode="decimal"
-                  icon="i-lucide-dollar-sign"
-                  class="w-full"
-                  @update:model-value="calculatorConfig.federalStandardDeduction = parseNumberInput($event)"
-                />
-              </UFormField>
-
-              <UFormField
-                v-if="selectedState === 'MA'"
-                label="Massachusetts Surtax Floor"
-                name="massachusettsSurtaxFloor"
-                class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
-              >
-                <UInput
-                  :model-value="formatNumberInput(calculatorConfig.massachusettsSurtaxFloor)"
-                  type="text"
-                  :min="0"
-                  :step="1000"
-                  inputmode="decimal"
-                  icon="i-lucide-dollar-sign"
-                  class="w-full"
-                  @update:model-value="calculatorConfig.massachusettsSurtaxFloor = parseNumberInput($event)"
-                />
-              </UFormField>
-
-              <UFormField
-                label="Social Security Wage Ceiling"
-                name="socialSecurityMaximumTaxableWage"
-                class="[&>label]:flex [&>label]:min-h-10 [&>label]:items-end"
-              >
-                <UInput
-                  :model-value="formatNumberInput(calculatorConfig.socialSecurityMaximumTaxableWage)"
-                  type="text"
-                  :min="0"
-                  :step="100"
-                  inputmode="decimal"
-                  icon="i-lucide-dollar-sign"
-                  class="w-full"
-                  @update:model-value="calculatorConfig.socialSecurityMaximumTaxableWage = parseNumberInput($event)"
-                />
-              </UFormField>
-            </div>
-
-            <div>
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <h3 class="text-sm font-semibold text-highlighted">
-                  {{ selectedYear }} Federal Tax Brackets
-                </h3>
-
-                <div class="flex items-center gap-2">
-                  <UButton
-                    label="Reset to year defaults"
-                    icon="i-lucide-rotate-ccw"
-                    color="neutral"
-                    variant="ghost"
-                    size="sm"
-                    @click="resetCalculatorConfig"
-                  />
-
-                  <UButton
-                    label="Add Bracket"
-                    icon="i-lucide-plus"
-                    color="neutral"
-                    variant="subtle"
-                    size="sm"
-                    @click="addFederalTaxBracket"
-                  />
-                </div>
-              </div>
-
-              <div class="overflow-x-auto">
-                <table class="w-full min-w-[640px] text-left text-sm">
-                  <thead class="border-b border-default text-muted">
-                    <tr>
-                      <th class="py-2 pr-3 font-medium">
-                        From
-                      </th>
-                      <th class="px-3 py-2 font-medium">
-                        To
-                      </th>
-                      <th class="px-3 py-2 font-medium">
-                        Rate %
-                      </th>
-                      <th class="py-2 pl-3 text-right font-medium">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody class="divide-y divide-default">
-                    <tr
-                      v-for="(bracket, index) in calculatorConfig.federalTaxBrackets"
-                      :key="index"
-                    >
-                      <td class="py-3 pr-3">
-                        <UInput
-                          :model-value="formatNumberInput(bracket.from)"
-                          type="text"
-                          :min="0"
-                          :step="100"
-                          inputmode="decimal"
-                          icon="i-lucide-dollar-sign"
-                          class="w-full"
-                          @update:model-value="bracket.from = parseNumberInput($event)"
-                        />
-                      </td>
-
-                      <td class="px-3 py-3">
-                        <UInput
-                          :model-value="bracket.to === undefined ? '' : formatNumberInput(bracket.to)"
-                          type="text"
-                          :min="0"
-                          :step="100"
-                          inputmode="decimal"
-                          placeholder="No cap"
-                          icon="i-lucide-dollar-sign"
-                          class="w-full"
-                          @update:model-value="bracket.to = parseOptionalNumberInput($event)"
-                        />
-                      </td>
-
-                      <td class="px-3 py-3">
-                        <UInput
-                          v-model.number="bracket.ratePercent"
-                          type="number"
-                          :min="0"
-                          :step="0.01"
-                          inputmode="decimal"
-                          class="w-full"
-                        />
-                      </td>
-
-                      <td class="py-3 pl-3 text-right">
-                        <UButton
-                          icon="i-lucide-trash-2"
-                          color="neutral"
-                          variant="ghost"
-                          size="sm"
-                          aria-label="Remove federal tax bracket"
-                          :disabled="calculatorConfig.federalTaxBrackets.length <= 1"
-                          @click="removeFederalTaxBracket(index)"
-                        />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <aside class="space-y-4">
-        <section class="rounded-lg border border-default bg-default p-5">
-          <div class="flex items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-highlighted">
-              Load & Save Calculator Inputs
-            </h2>
-
-            <UIcon
-              name="i-lucide-file-json"
-              class="size-5 text-muted"
-            />
-          </div>
-
-          <div class="mt-5 grid gap-3">
-            <UButton
-              label="Import Tax Inputs"
-              icon="i-lucide-upload"
-              color="neutral"
-              variant="subtle"
-              block
-              @click="importInput?.click()"
-            />
-
-            <UButton
-              label="Export Tax Inputs"
-              icon="i-lucide-download"
-              color="primary"
-              variant="solid"
-              block
-              @click="exportDialogOpen = true"
-            />
-          </div>
-
-          <input
-            ref="importInput"
-            type="file"
-            accept="application/json,.json"
-            class="hidden"
-            @change="importInputs"
-          >
-
-          <UModal
-            v-model:open="exportDialogOpen"
-            title="Export Tax Inputs"
-            description="Choose a JSON file name for this calculator export."
-          >
-            <template #body>
-              <form
-                id="export-tax-inputs-form"
-                @submit.prevent="exportInputs"
-              >
-                <UFormField
-                  label="File name"
-                  name="exportFileName"
-                >
-                  <UInput
-                    v-model="exportFileName"
-                    type="text"
-                    icon="i-lucide-file-json"
-                    placeholder="tax-calculator-inputs.json"
-                    autofocus
-                    class="w-full"
-                  />
-                </UFormField>
-              </form>
-            </template>
-
-            <template #footer="{ close }">
-              <div class="flex w-full justify-end gap-2">
+              <div class="mt-5 grid gap-3">
                 <UButton
-                  label="Cancel"
+                  label="Import Tax Inputs"
+                  icon="i-lucide-upload"
                   color="neutral"
-                  variant="ghost"
-                  @click="close"
+                  variant="subtle"
+                  block
+                  @click="importInput?.click()"
                 />
+
                 <UButton
                   label="Export Tax Inputs"
                   icon="i-lucide-download"
                   color="primary"
-                  type="submit"
-                  form="export-tax-inputs-form"
+                  variant="solid"
+                  block
+                  @click="exportDialogOpen = true"
                 />
               </div>
-            </template>
-          </UModal>
-        </section>
 
-        <section class="rounded-lg border border-default bg-default p-5">
-          <div class="flex items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-highlighted">
-              Calculations
-            </h2>
+              <input
+                ref="importInput"
+                type="file"
+                accept="application/json,.json"
+                class="hidden"
+                @change="importInputs"
+              >
 
-            <UIcon
-              name="i-lucide-braces"
-              class="size-5 text-muted"
-            />
-          </div>
-
-          <div class="mt-5 space-y-6">
-            <div>
-              <h3 class="text-sm font-semibold text-highlighted">
-                Taxable Income
-              </h3>
-
-              <dl class="mt-3 space-y-4">
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Federal Ordinary Taxable Income
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.federalOrdinaryIncome) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    FICA Taxable Income
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.ficaWage) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    State Taxable Income
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.stateTaxableIncome) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Long Term Gains Taxable Income
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.longTermTaxableIncome) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Net Investment Taxable Income
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.netInvestmentTaxableIncome) }}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            <div class="border-t border-default pt-5">
-              <h3 class="text-sm font-semibold text-highlighted">
-                Taxes
-              </h3>
-
-              <dl class="mt-3 space-y-4">
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Federal Tax
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.federalTax) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    FICA Tax
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.ficaTax) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    {{ selectedState === 'NY' ? 'New York State Tax' : 'State Tax' }}
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.stateTax) }}
-                  </dd>
-                </div>
-
-                <div v-if="selectedState === 'NY' && nycResident">
-                  <dt class="text-sm font-medium text-muted">
-                    NYC Resident Tax
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.cityTax) }}
-                  </dd>
-                  <p class="mt-1 text-xs text-muted">
-                    Includes {{ formatCurrency(calculationResults.cityTaxCredits) }} in modeled NYC credits. A negative tax represents refundable credits.
-                  </p>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Long Term Gains Tax
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.longTermTax) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Net Investment Income Tax
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.netInvestmentIncomeTax) }}
-                  </dd>
-                </div>
-
-                <div class="border-t border-default pt-4">
-                  <dt class="text-sm font-medium text-muted">
-                    Total Tax
-                  </dt>
-                  <dd class="mt-1 text-2xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.totalTax) }}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            <div class="border-t border-default pt-5">
-              <h3 class="text-sm font-semibold text-highlighted">
-                Retirement and HSA Contributions
-              </h3>
-
-              <dl class="mt-3 space-y-4">
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    401(k) (Employee)
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.retirement401kContributions) }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    HSA Contributions (Employee)
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.hsaEmployeeContributionAmount) }}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            <div class="border-t border-default pt-5">
-              <h3 class="text-sm font-semibold text-highlighted">
-                Summary
-              </h3>
-
-              <dl class="mt-3 space-y-4">
-                <div>
-                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
-                    <span>Effective Tax Rate</span>
-                    <UTooltip text="Total tax as a percentage of all income, excluding taxable benefits.">
-                      <UButton
-                        icon="i-lucide-circle-help"
-                        color="neutral"
-                        variant="ghost"
-                        size="xs"
-                        class="size-5 p-0"
-                        aria-label="Effective Tax Rate description"
+              <UModal
+                v-model:open="exportDialogOpen"
+                title="Export Tax Inputs"
+                description="Choose a JSON file name for this calculator export."
+              >
+                <template #body>
+                  <form
+                    id="export-tax-inputs-form"
+                    @submit.prevent="exportInputs"
+                  >
+                    <UFormField
+                      label="File name"
+                      name="exportFileName"
+                    >
+                      <UInput
+                        v-model="exportFileName"
+                        type="text"
+                        icon="i-lucide-file-json"
+                        placeholder="tax-calculator-inputs.json"
+                        autofocus
+                        class="w-full"
                       />
-                    </UTooltip>
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(calculationResults.effectiveTaxRate) }}
-                  </dd>
-                </div>
+                    </UFormField>
+                  </form>
+                </template>
 
+                <template #footer="{ close }">
+                  <div class="flex w-full justify-end gap-2">
+                    <UButton
+                      label="Cancel"
+                      color="neutral"
+                      variant="ghost"
+                      @click="close"
+                    />
+                    <UButton
+                      label="Export Tax Inputs"
+                      icon="i-lucide-download"
+                      color="primary"
+                      type="submit"
+                      form="export-tax-inputs-form"
+                    />
+                  </div>
+                </template>
+              </UModal>
+            </section>
+
+            <section class="rounded-lg border border-default bg-default p-5">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="text-lg font-semibold text-highlighted">
+                  Calculations
+                </h2>
+
+                <UIcon
+                  name="i-lucide-braces"
+                  class="size-5 text-muted"
+                />
+              </div>
+
+              <div class="mt-5 space-y-6">
                 <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Marginal Tax Rate (Wage Income)
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(calculationResults.marginalTaxRateWageIncome) }}
-                  </dd>
+                  <h3 class="text-sm font-semibold text-highlighted">
+                    Taxable Income
+                  </h3>
+
+                  <dl class="mt-3 space-y-4">
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Federal Ordinary Taxable Income
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.federalOrdinaryIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        FICA Taxable Income
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.ficaWage) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        State Taxable Income
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.stateTaxableIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Long Term Gains Taxable Income
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.longTermTaxableIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Net Investment Taxable Income
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.netInvestmentTaxableIncome) }}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
 
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Marginal Tax Rate (Investment Income)
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(calculationResults.marginalTaxRateInvestmentIncome) }}
-                  </dd>
+                <div class="border-t border-default pt-5">
+                  <h3 class="text-sm font-semibold text-highlighted">
+                    Taxes
+                  </h3>
+
+                  <dl class="mt-3 space-y-4">
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Federal Tax
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.federalTax) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        FICA Tax
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.ficaTax) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        {{ selectedState === 'NY' ? 'New York State Tax' : 'State Tax' }}
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.stateTax) }}
+                      </dd>
+                    </div>
+
+                    <div v-if="selectedState === 'NY' && nycResident">
+                      <dt class="text-sm font-medium text-muted">
+                        NYC Resident Tax
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.cityTax) }}
+                      </dd>
+                      <p class="mt-1 text-xs text-muted">
+                        Includes {{ formatCurrency(calculationResults.cityTaxCredits) }} in modeled NYC credits. A negative tax represents refundable credits.
+                      </p>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Long Term Gains Tax
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.longTermTax) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Net Investment Income Tax
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.netInvestmentIncomeTax) }}
+                      </dd>
+                    </div>
+
+                    <div class="border-t border-default pt-4">
+                      <dt class="text-sm font-medium text-muted">
+                        Total Tax
+                      </dt>
+                      <dd class="mt-1 text-2xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.totalTax) }}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
 
-                <div>
-                  <dt class="text-sm font-medium text-muted">
-                    Marginal Tax Rate (Long Term & Qualified Income)
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatPercent(calculationResults.marginalTaxRateLongTermIncome) }}
-                  </dd>
+                <div class="border-t border-default pt-5">
+                  <h3 class="text-sm font-semibold text-highlighted">
+                    Retirement and HSA Contributions
+                  </h3>
+
+                  <dl class="mt-3 space-y-4">
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        401(k) (Employee)
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.retirement401kContributions) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        HSA Contributions (Employee)
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.hsaEmployeeContributionAmount) }}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
 
-                <div class="border-t border-default pt-4">
-                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
-                    <span>Net Income</span>
-                    <UTooltip text="All income minus taxes, taxable benefits, contributions, and health insurance.">
-                      <UButton
-                        icon="i-lucide-circle-help"
-                        color="neutral"
-                        variant="ghost"
-                        size="xs"
-                        class="size-5 p-0"
-                        aria-label="Net Income description"
-                      />
-                    </UTooltip>
-                  </dt>
-                  <dd class="mt-1 text-2xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.netIncome) }}
-                  </dd>
-                </div>
+                <div class="border-t border-default pt-5">
+                  <h3 class="text-sm font-semibold text-highlighted">
+                    Summary
+                  </h3>
 
-                <div>
-                  <dt class="flex items-center gap-1 text-sm font-medium text-muted">
-                    <span>Net Wage Income</span>
-                    <UTooltip text="All income minus taxes, taxable benefits, contributions, health insurance, and (gross) investment income.">
-                      <UButton
-                        icon="i-lucide-circle-help"
-                        color="neutral"
-                        variant="ghost"
-                        size="xs"
-                        class="size-5 p-0"
-                        aria-label="Net Wage Income description"
-                      />
-                    </UTooltip>
-                  </dt>
-                  <dd class="mt-1 text-xl font-semibold text-highlighted">
-                    {{ formatCurrency(calculationResults.netIncomeMinusInvestmentIncome) }}
-                  </dd>
+                  <dl class="mt-3 space-y-4">
+                    <div>
+                      <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                        <span>Effective Tax Rate</span>
+                        <UTooltip text="Total tax as a percentage of all income, excluding taxable benefits.">
+                          <UButton
+                            icon="i-lucide-circle-help"
+                            color="neutral"
+                            variant="ghost"
+                            size="xs"
+                            class="size-5 p-0"
+                            aria-label="Effective Tax Rate description"
+                          />
+                        </UTooltip>
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatPercent(calculationResults.effectiveTaxRate) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Marginal Tax Rate (Wage Income)
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatPercent(calculationResults.marginalTaxRateWageIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Marginal Tax Rate (Investment Income)
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatPercent(calculationResults.marginalTaxRateInvestmentIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="text-sm font-medium text-muted">
+                        Marginal Tax Rate (Long Term & Qualified Income)
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatPercent(calculationResults.marginalTaxRateLongTermIncome) }}
+                      </dd>
+                    </div>
+
+                    <div class="border-t border-default pt-4">
+                      <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                        <span>Net Income</span>
+                        <UTooltip text="All income minus taxes, taxable benefits, contributions, and health insurance.">
+                          <UButton
+                            icon="i-lucide-circle-help"
+                            color="neutral"
+                            variant="ghost"
+                            size="xs"
+                            class="size-5 p-0"
+                            aria-label="Net Income description"
+                          />
+                        </UTooltip>
+                      </dt>
+                      <dd class="mt-1 text-2xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.netIncome) }}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt class="flex items-center gap-1 text-sm font-medium text-muted">
+                        <span>Net Wage Income</span>
+                        <UTooltip text="All income minus taxes, taxable benefits, contributions, health insurance, and (gross) investment income.">
+                          <UButton
+                            icon="i-lucide-circle-help"
+                            color="neutral"
+                            variant="ghost"
+                            size="xs"
+                            class="size-5 p-0"
+                            aria-label="Net Wage Income description"
+                          />
+                        </UTooltip>
+                      </dt>
+                      <dd class="mt-1 text-xl font-semibold text-highlighted">
+                        {{ formatCurrency(calculationResults.netIncomeMinusInvestmentIncome) }}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
-              </dl>
-            </div>
-          </div>
-        </section>
-      </aside>
-    </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </template>
+      <template #compare>
+        <TaxComparison
+          v-if="activeTaxView === 'compare'"
+          :scenario="calculationPayload"
+        />
+      </template>
+    </UTabs>
   </UContainer>
 </template>

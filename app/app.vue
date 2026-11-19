@@ -17,33 +17,39 @@ function isActive(to: string) {
   <UApp>
     <div class="flex min-h-screen flex-col">
       <header class="border-b border-default bg-default">
-        <UContainer class="flex items-center justify-between gap-4 py-5">
+        <UContainer class="flex items-center justify-between gap-4 py-4 sm:py-5">
           <NuxtLink
             to="/"
-            class="flex items-center gap-3 font-semibold tracking-tight text-highlighted"
+            class="inline-flex items-center gap-3 rounded-xl text-xl font-bold tracking-tight text-highlighted outline-primary focus-visible:outline-2 focus-visible:outline-offset-4 sm:text-2xl"
           >
             <AppLogo />
-            Personal Finance
+            <span>Personal Finance</span>
           </NuxtLink>
           <UColorModeButton />
         </UContainer>
         <UContainer>
           <nav
             aria-label="Main navigation"
-            class="flex gap-1 overflow-x-auto pb-3"
+            class="grid grid-cols-[1fr_1fr_1.25fr_1fr] gap-1 pb-3 sm:flex sm:gap-2"
           >
             <NuxtLink
               v-for="link in links"
               :key="link.to"
               :to="link.to"
               :aria-current="isActive(link.to) ? 'page' : undefined"
-              class="flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-              :class="isActive(link.to) ? 'bg-primary/10 text-primary' : 'text-muted hover:bg-elevated hover:text-highlighted'"
+              class="group flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border px-0.5 py-1.5 text-center text-xs font-semibold leading-tight whitespace-nowrap outline-primary transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 sm:min-h-12 sm:flex-row sm:justify-start sm:gap-2.5 sm:px-3 sm:text-base"
+              :class="isActive(link.to) ? 'border-primary/25 bg-primary/10 text-primary' : 'border-transparent text-toned hover:bg-elevated hover:text-highlighted'"
             >
-              <UIcon
-                :name="link.icon"
-                class="size-4"
-              />{{ link.label }}
+              <span
+                class="grid size-7 shrink-0 place-items-center rounded-md bg-elevated transition-colors group-aria-[current=page]:bg-primary/15 sm:size-8 sm:rounded-lg"
+                aria-hidden="true"
+              >
+                <UIcon
+                  :name="link.icon"
+                  class="size-[18px] sm:size-5"
+                />
+              </span>
+              <span>{{ link.label }}</span>
             </NuxtLink>
           </nav>
         </UContainer>
