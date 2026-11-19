@@ -3,7 +3,7 @@ useSeoMeta({ title: 'Overview | Personal Finance' })
 const calculators = [
   { number: '01', title: 'Make your next move.', category: 'HOME & MORTGAGE', icon: 'i-lucide-house', to: '/mortgage', action: 'Compare buying and renting', description: 'See how owning a home compares with renting and investing. Explore financing, ownership costs, and long-term returns.', features: ['Buy vs. rent comparison', 'Mortgage amortization', 'Save and load scenarios'] },
   { number: '02', title: 'Make spending count.', category: 'CREDIT CARD REWARDS', icon: 'i-lucide-credit-card', to: '/credit/card-value', action: 'Explore card rewards', description: 'Find the value behind your everyday spending. Compare cards, account for fees, and build a wallet that works for you.', features: ['Annual rewards and fees', 'Multi-card wallet optimizer', 'Custom spending presets'] },
-  { number: '03', title: 'Know what stays yours.', category: 'INCOME TAXES', icon: 'i-lucide-receipt-text', to: '/taxes', action: 'Estimate your taxes', description: 'Understand your estimated take-home income, federal taxes, and state taxes with adjustable income and deductions.', features: ['Single filer estimates', 'Massachusetts and California', 'Income and deduction breakdowns'] }
+  { number: '03', title: 'Know what stays yours.', category: 'INCOME TAXES', icon: 'i-lucide-receipt-text', to: '/taxes', action: 'Estimate your taxes', description: 'Understand your estimated take-home income, federal taxes, and state taxes with adjustable income and deductions.', features: ['Single filer estimates', 'Massachusetts, California, and New York', 'Income and deduction breakdowns'] }
 ]
 </script>
 

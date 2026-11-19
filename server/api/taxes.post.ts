@@ -1,3 +1,6 @@
+import { calculateNewYorkTaxes, type NewYorkInputs } from '../utils/new-york-tax'
+import { createCalculatorConfig, getTaxYearRules, resolveTaxYear } from '../../shared/utils/tax-years'
+
 interface IncomePayload {
   wageIncome?: number
   taxableBenefits?: number
@@ -45,10 +48,13 @@ interface CalculatorConfigPayload {
   federalTaxBrackets?: ConfigTaxBracketPayload[]
 }
 
-type TaxState = 'MA' | 'CA'
+type TaxState = 'MA' | 'CA' | 'NY'
 
 interface CalculatePayload {
+  taxYear?: unknown
   taxState?: TaxState
+  nycResident?: boolean
+  newYorkInputs?: NewYorkInputs
   income?: IncomePayload
   adjustments?: AdjustmentsPayload
   optionalDeductions?: OptionalDeductionsPayload
@@ -72,6 +78,8 @@ interface CoreCalculationResults {
   federalTax: number
   ficaTax: number
   stateTax: number
+  cityTax: number
+  cityTaxCredits: number
   longTermTax: number
   netInvestmentIncomeTax: number
   totalTax: number
@@ -83,38 +91,8 @@ interface CoreCalculationResults {
 }
 
 const massachusettsPersonalExemption = 4400
-const longTermTaxZeroRateThreshold = 49450
-const longTermTaxFifteenRateThreshold = 545500
-const baseSaltDeductionCap = 40400
 const minimumSaltDeductionCap = 10000
-const saltDeductionPhaseoutThreshold = 500000
 const saltDeductionPhaseoutRate = 0.30
-
-// FTB's 2026 estimated-tax instructions direct taxpayers to use 2025 rates and amounts.
-const californiaStandardDeduction = 5706
-const californiaPersonalExemptionCredit = 153
-
-const californiaTaxBrackets: ConfigTaxBracketPayload[] = [
-  { from: 0, to: 11079, ratePercent: 1 },
-  { from: 11079, to: 26264, ratePercent: 2 },
-  { from: 26264, to: 41452, ratePercent: 4 },
-  { from: 41452, to: 57542, ratePercent: 6 },
-  { from: 57542, to: 72724, ratePercent: 8 },
-  { from: 72724, to: 371479, ratePercent: 9.3 },
-  { from: 371479, to: 445771, ratePercent: 10.3 },
-  { from: 445771, to: 742953, ratePercent: 11.3 },
-  { from: 742953, ratePercent: 12.3 }
-]
-
-const defaultFederalTaxBrackets: ConfigTaxBracketPayload[] = [
-  { from: 0, to: 12400, ratePercent: 10 },
-  { from: 12400, to: 50400, ratePercent: 12 },
-  { from: 50400, to: 105700, ratePercent: 22 },
-  { from: 105700, to: 201775, ratePercent: 24 },
-  { from: 201775, to: 256225, ratePercent: 32 },
-  { from: 256225, to: 640600, ratePercent: 35 },
-  { from: 640600, to: undefined, ratePercent: 37 }
-]
 
 const normalizeAmount = (value: number | undefined) => {
   const amount = Number(value ?? 0)
@@ -124,7 +102,7 @@ const normalizeAmount = (value: number | undefined) => {
 
 const calculateProgressiveTax = (
   taxableIncome: number,
-  brackets: ConfigTaxBracketPayload[] = defaultFederalTaxBrackets
+  brackets: ConfigTaxBracketPayload[]
 ) => {
   const incomeAmount = Math.max(taxableIncome, 0)
 
@@ -138,7 +116,7 @@ const calculateProgressiveTax = (
   }, 0)
 }
 
-const calculateSaltDeductionCap = (federalOrdinaryIncome: number) =>
+const calculateSaltDeductionCap = (federalOrdinaryIncome: number, baseSaltDeductionCap: number, saltDeductionPhaseoutThreshold: number) =>
   Math.max(
     baseSaltDeductionCap
     - saltDeductionPhaseoutRate * Math.max(federalOrdinaryIncome - saltDeductionPhaseoutThreshold, 0),
@@ -149,12 +127,15 @@ const calculateCoreResults = (
   payload: CalculatePayload,
   deltas: MarginalIncomeDeltas = {}
 ): CoreCalculationResults => {
-  const taxState: TaxState = payload.taxState === 'CA' ? 'CA' : 'MA'
+  const taxState: TaxState = payload.taxState === 'NY' ? 'NY' : payload.taxState === 'CA' ? 'CA' : 'MA'
   const income = payload.income ?? {}
   const adjustments = payload.adjustments ?? {}
   const optionalDeductions = payload.optionalDeductions ?? {}
   const interestBreakdown = payload.interestBreakdown ?? {}
   const hsaBreakdown = payload.hsaBreakdown ?? {}
+  const taxYear = resolveTaxYear(payload.taxYear)
+  const rules = getTaxYearRules(taxYear)
+  const defaults = createCalculatorConfig(taxYear)
   const calculatorConfig = payload.calculatorConfig ?? {}
 
   const wageIncome = normalizeAmount(income.wageIncome) + normalizeAmount(deltas.wageIncome)
@@ -176,13 +157,13 @@ const calculateCoreResults = (
   const carryOverCapitalLoss = normalizeAmount(optionalDeductions.carryOverCapitalLoss)
   const stateTaxExemptInterest = normalizeAmount(interestBreakdown.stateTaxExempt)
   const notStateTaxExemptInterest = normalizeAmount(interestBreakdown.notStateTaxExempt)
-  const federalStandardDeduction = normalizeAmount(calculatorConfig.federalStandardDeduction) || 16100
-  const massachusettsSurtaxFloor = normalizeAmount(calculatorConfig.massachusettsSurtaxFloor) || 1107750
+  const federalStandardDeduction = normalizeAmount(calculatorConfig.federalStandardDeduction) || defaults.federalStandardDeduction
+  const massachusettsSurtaxFloor = normalizeAmount(calculatorConfig.massachusettsSurtaxFloor) || defaults.massachusettsSurtaxFloor
   const socialSecurityMaximumTaxableWage
-    = normalizeAmount(calculatorConfig.socialSecurityMaximumTaxableWage) || 184500
+    = normalizeAmount(calculatorConfig.socialSecurityMaximumTaxableWage) || defaults.socialSecurityMaximumTaxableWage
   const federalTaxBrackets = calculatorConfig.federalTaxBrackets?.length
     ? calculatorConfig.federalTaxBrackets
-    : defaultFederalTaxBrackets
+    : defaults.federalTaxBrackets
   const grossIncome = wageIncome
     + taxableBenefits
     + interestIncome
@@ -213,11 +194,11 @@ const calculateCoreResults = (
       0
     )
   }
-  let saltDeductionCap = baseSaltDeductionCap
+  let saltDeductionCap = rules.federal.saltCap
   let federalOrdinaryIncome = calculateFederalOrdinaryIncome(saltDeductionCap)
 
   for (let index = 0; index < 24; index += 1) {
-    const nextSaltDeductionCap = calculateSaltDeductionCap(federalOrdinaryIncome)
+    const nextSaltDeductionCap = calculateSaltDeductionCap(federalOrdinaryIncome, rules.federal.saltCap, rules.federal.saltPhaseout)
     const nextFederalOrdinaryIncome = calculateFederalOrdinaryIncome(nextSaltDeductionCap)
 
     if (
@@ -263,7 +244,7 @@ const calculateCoreResults = (
     - stateTaxExemptInterest,
     0
   )
-  const californiaDeduction = Math.max(californiaStandardDeduction, mortgageInterest)
+  const californiaDeduction = Math.max(rules.california.standardDeduction, mortgageInterest)
   const californiaTaxableIncome = Math.max(
     grossIncome
     + longTermTaxableIncome
@@ -276,13 +257,23 @@ const calculateCoreResults = (
     - stateTaxExemptInterest,
     0
   )
-  const stateTaxableIncome = taxState === 'CA'
-    ? californiaTaxableIncome
-    : massachusettsTaxableIncome
+  const newYork = calculateNewYorkTaxes(
+    taxYear,
+    Math.max(0, totalIncome - retirement401kContributions - hsaEmployeeContributionAmount
+    - healthInsurancePayments - federalCapitalLossDeduction - investmentExpenses),
+    stateTaxExemptInterest,
+    taxState === 'NY' && payload.nycResident === true,
+    payload.newYorkInputs
+  )
+  const stateTaxableIncome = taxState === 'NY'
+    ? newYork.taxableIncome
+    : taxState === 'CA'
+      ? californiaTaxableIncome
+      : massachusettsTaxableIncome
   const federalTax = calculateProgressiveTax(federalOrdinaryIncome, federalTaxBrackets)
-  const longTermTaxRate = federalOrdinaryIncome <= longTermTaxZeroRateThreshold
+  const longTermTaxRate = federalOrdinaryIncome <= rules.federal.gainsZero
     ? 0
-    : federalOrdinaryIncome <= longTermTaxFifteenRateThreshold
+    : federalOrdinaryIncome <= rules.federal.gainsFifteen
       ? 0.15
       : 0.20
   const longTermTax = longTermTaxableIncome * longTermTaxRate
@@ -290,16 +281,18 @@ const calculateCoreResults = (
     + Math.max(massachusettsTaxableIncome - massachusettsSurtaxFloor, 0) * 0.09
   const californiaIncomeTax = calculateProgressiveTax(
     californiaTaxableIncome,
-    californiaTaxBrackets
+    rules.california.brackets
   )
   const californiaBehavioralHealthServicesTax = Math.max(californiaTaxableIncome - 1000000, 0) * 0.01
   const californiaTax = Math.max(
     californiaIncomeTax
     + californiaBehavioralHealthServicesTax
-    - californiaPersonalExemptionCredit,
+    - rules.california.exemptionCredit,
     0
   )
-  const stateTax = taxState === 'CA' ? californiaTax : massachusettsTax
+  const stateTax = taxState === 'NY' ? newYork.stateTax : taxState === 'CA' ? californiaTax : massachusettsTax
+  const cityTax = taxState === 'NY' ? newYork.cityTax : 0
+  const cityTaxCredits = taxState === 'NY' ? newYork.cityTaxCredits : 0
   const netInvestmentThresholdIncome = federalOrdinaryIncome
     + longTermTaxableIncome
     + interestIncome
@@ -310,7 +303,7 @@ const calculateCoreResults = (
     Math.max(netInvestmentThresholdIncome - 200000, 0)
   )
   const netInvestmentIncomeTax = netInvestmentTaxableIncome * 0.038
-  const totalTax = federalTax + stateTax + ficaTax + netInvestmentIncomeTax + longTermTax
+  const totalTax = federalTax + stateTax + cityTax + ficaTax + netInvestmentIncomeTax + longTermTax
   const netIncome = totalIncome
     - taxableBenefits
     - retirement401kContributions
@@ -334,6 +327,8 @@ const calculateCoreResults = (
     federalTax,
     ficaTax,
     stateTax,
+    cityTax,
+    cityTaxCredits,
     longTermTax,
     netInvestmentIncomeTax,
     totalTax,

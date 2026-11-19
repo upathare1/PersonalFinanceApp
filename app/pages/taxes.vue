@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { createCalculatorConfig, defaultTaxYear, getTaxYearRules, resolveTaxYear, taxYears, type CalculatorConfig, type TaxYear } from '#shared/utils/tax-years'
+
 type IncomeKey
   = | 'wageIncome'
     | 'taxableBenefits'
@@ -20,7 +22,7 @@ type OptionalDeductionKey
     | 'massachusettsRent'
     | 'carryOverCapitalLoss'
 
-type TaxState = 'MA' | 'CA'
+type TaxState = 'MA' | 'CA' | 'NY'
 
 interface IncomeInput {
   key: IncomeKey
@@ -45,23 +47,13 @@ interface OptionalDeductionInput {
   icon: string
 }
 
-interface ConfigTaxBracket {
-  from: number
-  to?: number
-  ratePercent: number
-}
-
-interface CalculatorConfig {
-  federalStandardDeduction: number
-  massachusettsSurtaxFloor: number
-  socialSecurityMaximumTaxableWage: number
-  federalTaxBrackets: ConfigTaxBracket[]
-}
-
 type NumberInputValue = string | number
 
 interface CalculationPayload {
+  taxYear: TaxYear
   taxState: TaxState
+  nycResident: boolean
+  newYorkInputs: { additions: number, subtractions: number, itemizedDeduction: number }
   income: Record<IncomeKey, number | undefined>
   adjustments: Record<AdjustmentKey, number | undefined>
   optionalDeductions: Record<OptionalDeductionKey, number>
@@ -85,6 +77,8 @@ interface CalculationResults {
   federalTax: number
   ficaTax: number
   stateTax: number
+  cityTax: number
+  cityTaxCredits: number
   longTermTax: number
   netInvestmentIncomeTax: number
   totalTax: number
@@ -174,8 +168,8 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   },
   {
     key: 'stateTaxesWithholding',
-    label: 'State Tax Withholding',
-    description: 'Automatically tracks calculated state tax, but can be edited manually.',
+    label: 'State / Local Tax Withholding',
+    description: 'Automatically tracks calculated state and NYC taxes (after modeled credits), but can be edited manually.',
     icon: 'i-lucide-file-minus'
   },
   {
@@ -201,23 +195,9 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
 
 const stateOptions = [
   { label: 'Massachusetts', value: 'MA' },
-  { label: 'California', value: 'CA' }
+  { label: 'California', value: 'CA' },
+  { label: 'New York', value: 'NY' }
 ]
-
-const defaultCalculatorConfig: CalculatorConfig = {
-  federalStandardDeduction: 16100,
-  massachusettsSurtaxFloor: 1107750,
-  socialSecurityMaximumTaxableWage: 184500,
-  federalTaxBrackets: [
-    { from: 0, to: 12400, ratePercent: 10 },
-    { from: 12400, to: 50400, ratePercent: 12 },
-    { from: 50400, to: 105700, ratePercent: 22 },
-    { from: 105700, to: 201775, ratePercent: 24 },
-    { from: 201775, to: 256225, ratePercent: 32 },
-    { from: 256225, to: 640600, ratePercent: 35 },
-    { from: 640600, ratePercent: 37 }
-  ]
-}
 
 const income = reactive<Record<IncomeKey, number | undefined>>({
   wageIncome: undefined,
@@ -243,15 +223,25 @@ const optionalDeductions = reactive<Record<OptionalDeductionKey, number>>({
   carryOverCapitalLoss: 0
 })
 
-const calculatorConfig = reactive<CalculatorConfig>({
-  federalStandardDeduction: defaultCalculatorConfig.federalStandardDeduction,
-  massachusettsSurtaxFloor: defaultCalculatorConfig.massachusettsSurtaxFloor,
-  socialSecurityMaximumTaxableWage: defaultCalculatorConfig.socialSecurityMaximumTaxableWage,
-  federalTaxBrackets: defaultCalculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
+const selectedYear = ref<TaxYear>(defaultTaxYear)
+const yearOptions = taxYears.map(year => ({ label: String(year), value: year }))
+const stateRulesYear = computed(() => getTaxYearRules(selectedYear.value).stateRulesYear)
+const configsByYear = reactive<Record<TaxYear, CalculatorConfig>>({
+  2025: createCalculatorConfig(2025),
+  2026: createCalculatorConfig(2026),
+  2027: createCalculatorConfig(2027)
 })
+const calculatorConfig = computed(() => configsByYear[selectedYear.value])
 
 const selectedState = ref<TaxState>('MA')
-const selectedStateName = computed(() => selectedState.value === 'CA' ? 'California' : 'Massachusetts')
+const nycResident = ref(false)
+const newYorkInputs = reactive({ additions: 0, subtractions: 0, itemizedDeduction: 0 })
+const newYorkFields = [
+  { key: 'additions' as const, label: 'New York additions to income', description: 'Taxable NY additions not included above, such as other-state municipal bond interest.' },
+  { key: 'subtractions' as const, label: 'New York subtractions from income', description: 'Eligible NY subtractions not already entered, such as qualifying pension income. Do not repeat state-exempt interest.' },
+  { key: 'itemizedDeduction' as const, label: 'New York itemized deduction (after limits)', description: 'Optional: enter your total allowable IT-196 deduction after all NY limits. Otherwise the $8,000 standard deduction applies. Federal mortgage/property tax entries do not automatically populate this total.' }
+]
+const selectedStateName = computed(() => stateOptions.find(state => state.value === selectedState.value)!.label)
 const interestBreakdownExpanded = ref(false)
 const hsaBreakdownExpanded = ref(false)
 const optionalDeductionsExpanded = ref(false)
@@ -271,6 +261,8 @@ const defaultCalculationResults: CalculationResults = {
   federalTax: 0,
   ficaTax: 0,
   stateTax: 0,
+  cityTax: 0,
+  cityTaxCredits: 0,
   longTermTax: 0,
   netInvestmentIncomeTax: 0,
   totalTax: 0,
@@ -363,31 +355,24 @@ const formatPercent = (value: number) =>
   }).format(value)
 
 const resetCalculatorConfig = () => {
-  calculatorConfig.federalStandardDeduction = defaultCalculatorConfig.federalStandardDeduction
-  calculatorConfig.massachusettsSurtaxFloor = defaultCalculatorConfig.massachusettsSurtaxFloor
-  calculatorConfig.socialSecurityMaximumTaxableWage = defaultCalculatorConfig.socialSecurityMaximumTaxableWage
-  calculatorConfig.federalTaxBrackets.splice(
-    0,
-    calculatorConfig.federalTaxBrackets.length,
-    ...defaultCalculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
-  )
+  configsByYear[selectedYear.value] = createCalculatorConfig(selectedYear.value)
 }
 
 const addFederalTaxBracket = () => {
-  const lastBracket = calculatorConfig.federalTaxBrackets.at(-1)
+  const lastBracket = calculatorConfig.value.federalTaxBrackets.at(-1)
 
-  calculatorConfig.federalTaxBrackets.push({
+  calculatorConfig.value.federalTaxBrackets.push({
     from: lastBracket?.to ?? lastBracket?.from ?? 0,
     ratePercent: lastBracket?.ratePercent ?? 0
   })
 }
 
 const removeFederalTaxBracket = (index: number) => {
-  if (calculatorConfig.federalTaxBrackets.length <= 1) {
+  if (calculatorConfig.value.federalTaxBrackets.length <= 1) {
     return
   }
 
-  calculatorConfig.federalTaxBrackets.splice(index, 1)
+  calculatorConfig.value.federalTaxBrackets.splice(index, 1)
 }
 
 const normalizeJsonFileName = (fileName: string) => {
@@ -415,7 +400,10 @@ const optionalDeductionTotalPlaceholder = computed(() => {
 })
 
 const calculationPayload = computed<CalculationPayload>(() => ({
+  taxYear: selectedYear.value,
   taxState: selectedState.value,
+  nycResident: selectedState.value === 'NY' && nycResident.value,
+  newYorkInputs: { ...newYorkInputs },
   income: { ...income },
   adjustments: { ...adjustments },
   optionalDeductions: { ...optionalDeductions },
@@ -428,15 +416,18 @@ const calculationPayload = computed<CalculationPayload>(() => ({
     employerContributions: hsaEmployerContributionAmount.value
   },
   calculatorConfig: {
-    federalStandardDeduction: calculatorConfig.federalStandardDeduction,
-    massachusettsSurtaxFloor: calculatorConfig.massachusettsSurtaxFloor,
-    socialSecurityMaximumTaxableWage: calculatorConfig.socialSecurityMaximumTaxableWage,
-    federalTaxBrackets: calculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
+    federalStandardDeduction: calculatorConfig.value.federalStandardDeduction,
+    massachusettsSurtaxFloor: calculatorConfig.value.massachusettsSurtaxFloor,
+    socialSecurityMaximumTaxableWage: calculatorConfig.value.socialSecurityMaximumTaxableWage,
+    federalTaxBrackets: calculatorConfig.value.federalTaxBrackets.map(bracket => ({ ...bracket }))
   }
 }))
 
 const stateTaxInputSignature = computed(() => JSON.stringify({
+  taxYear: selectedYear.value,
   taxState: selectedState.value,
+  nycResident: selectedState.value === 'NY' && nycResident.value,
+  newYorkInputs: { ...newYorkInputs },
   income: { ...income },
   adjustments: { ...adjustments },
   deductions: {
@@ -451,8 +442,8 @@ const stateTaxInputSignature = computed(() => JSON.stringify({
   },
   hsaEmployeeContributions: hsaEmployeeContributionAmount.value,
   stateConfig: {
-    massachusettsSurtaxFloor: calculatorConfig.massachusettsSurtaxFloor,
-    socialSecurityMaximumTaxableWage: calculatorConfig.socialSecurityMaximumTaxableWage
+    massachusettsSurtaxFloor: calculatorConfig.value.massachusettsSurtaxFloor,
+    socialSecurityMaximumTaxableWage: calculatorConfig.value.socialSecurityMaximumTaxableWage
   }
 }))
 
@@ -477,7 +468,7 @@ watch(
 
         if (requestedStateTaxSignature !== lastAutoWithholdingSignature) {
           lastAutoWithholdingSignature = requestedStateTaxSignature
-          optionalDeductions.stateTaxesWithholding = Math.round(results.stateTax * 100) / 100
+          optionalDeductions.stateTaxesWithholding = Math.round(Math.max(0, results.stateTax + results.cityTax) * 100) / 100
         }
       }
     } catch (error) {
@@ -493,17 +484,20 @@ watch(
 
 const exportInputs = () => {
   const data = {
-    version: 2,
+    version: 4,
+    taxYear: selectedYear.value,
     exportedAt: new Date().toISOString(),
     taxState: selectedState.value,
+    nycResident: selectedState.value === 'NY' && nycResident.value,
+    newYorkInputs: { ...newYorkInputs },
     income: { ...income },
     adjustments: { ...adjustments },
     optionalDeductions: { ...optionalDeductions },
     calculatorConfig: {
-      federalStandardDeduction: calculatorConfig.federalStandardDeduction,
-      massachusettsSurtaxFloor: calculatorConfig.massachusettsSurtaxFloor,
-      socialSecurityMaximumTaxableWage: calculatorConfig.socialSecurityMaximumTaxableWage,
-      federalTaxBrackets: calculatorConfig.federalTaxBrackets.map(bracket => ({ ...bracket }))
+      federalStandardDeduction: calculatorConfig.value.federalStandardDeduction,
+      massachusettsSurtaxFloor: calculatorConfig.value.massachusettsSurtaxFloor,
+      socialSecurityMaximumTaxableWage: calculatorConfig.value.socialSecurityMaximumTaxableWage,
+      federalTaxBrackets: calculatorConfig.value.federalTaxBrackets.map(bracket => ({ ...bracket }))
     },
     interestBreakdown: {
       stateTaxExempt: stateTaxExemptInterest.value,
@@ -536,7 +530,10 @@ const importInputs = async (event: Event) => {
 
   try {
     const importedData = JSON.parse(await file.text()) as {
+      taxYear?: unknown
       taxState?: TaxState
+      nycResident?: boolean
+      newYorkInputs?: Partial<typeof newYorkInputs>
       income?: Partial<Record<IncomeKey, number>>
       adjustments?: Partial<Record<AdjustmentKey, number>>
       optionalDeductions?: Partial<Record<OptionalDeductionKey, number>>
@@ -551,7 +548,12 @@ const importInputs = async (event: Event) => {
       }
     }
 
-    selectedState.value = importedData.taxState === 'CA' ? 'CA' : 'MA'
+    selectedYear.value = resolveTaxYear(importedData.taxYear)
+    selectedState.value = importedData.taxState === 'NY' ? 'NY' : importedData.taxState === 'CA' ? 'CA' : 'MA'
+    nycResident.value = selectedState.value === 'NY' && importedData.nycResident === true
+    for (const field of newYorkFields) {
+      newYorkInputs[field.key] = normalizeAmount(importedData.newYorkInputs?.[field.key])
+    }
 
     for (const input of incomeInputs) {
       income[input.key] = importedData.income?.[input.key]
@@ -565,19 +567,13 @@ const importInputs = async (event: Event) => {
       optionalDeductions[input.key] = importedData.optionalDeductions?.[input.key] ?? 0
     }
 
-    if (importedData.calculatorConfig) {
-      calculatorConfig.federalStandardDeduction = importedData.calculatorConfig.federalStandardDeduction
-        ?? defaultCalculatorConfig.federalStandardDeduction
-      calculatorConfig.massachusettsSurtaxFloor = importedData.calculatorConfig.massachusettsSurtaxFloor
-        ?? defaultCalculatorConfig.massachusettsSurtaxFloor
-      calculatorConfig.socialSecurityMaximumTaxableWage = importedData.calculatorConfig.socialSecurityMaximumTaxableWage
-        ?? defaultCalculatorConfig.socialSecurityMaximumTaxableWage
-      calculatorConfig.federalTaxBrackets.splice(
-        0,
-        calculatorConfig.federalTaxBrackets.length,
-        ...(importedData.calculatorConfig.federalTaxBrackets ?? defaultCalculatorConfig.federalTaxBrackets)
-          .map(bracket => ({ ...bracket }))
-      )
+    const defaults = createCalculatorConfig(selectedYear.value)
+    const overrides = importedData.calculatorConfig
+    configsByYear[selectedYear.value] = {
+      federalStandardDeduction: overrides?.federalStandardDeduction ?? defaults.federalStandardDeduction,
+      massachusettsSurtaxFloor: overrides?.massachusettsSurtaxFloor ?? defaults.massachusettsSurtaxFloor,
+      socialSecurityMaximumTaxableWage: overrides?.socialSecurityMaximumTaxableWage ?? defaults.socialSecurityMaximumTaxableWage,
+      federalTaxBrackets: (overrides?.federalTaxBrackets ?? defaults.federalTaxBrackets).map(bracket => ({ ...bracket }))
     }
 
     stateTaxExemptInterest.value = importedData.interestBreakdown?.stateTaxExempt ?? 0
@@ -612,21 +608,84 @@ const importInputs = async (event: Event) => {
         </p>
       </div>
 
-      <UFormField
-        label="State of residence"
-        name="taxState"
-        class="w-full shrink-0 sm:w-56"
-      >
-        <USelect
-          v-model="selectedState"
-          :items="stateOptions"
-          value-key="value"
-          size="xl"
-          class="w-full"
-          aria-label="State of residence"
-        />
-      </UFormField>
+      <div class="grid w-full shrink-0 grid-cols-2 gap-3 sm:w-80">
+        <UFormField
+          label="Tax year"
+          name="taxYear"
+        >
+          <USelect
+            v-model="selectedYear"
+            :items="yearOptions"
+            value-key="value"
+            size="xl"
+            class="w-full"
+            aria-label="Tax year"
+          />
+        </UFormField>
+
+        <UFormField
+          label="State of residence"
+          name="taxState"
+        >
+          <USelect
+            v-model="selectedState"
+            :items="stateOptions"
+            value-key="value"
+            size="xl"
+            class="w-full"
+            aria-label="State of residence"
+          />
+        </UFormField>
+      </div>
     </div>
+
+    <section
+      v-if="selectedState === 'NY'"
+      class="mb-6 space-y-4 rounded-lg border border-default p-5"
+      aria-label="New York residency and adjustments"
+    >
+      <UCheckbox
+        v-model="nycResident"
+        label="Full-year New York City resident"
+        description="Adds NYC resident income tax. Working in NYC alone does not make you a city resident."
+      />
+      <p class="text-sm leading-6 text-muted">
+        Estimates assume a single filer who cannot be claimed as a dependent. Includes state tax-benefit recapture, household credits, and NYC school-tax credits. Other credits, Yonkers taxes, and self-employment MCTMT are not modeled.
+      </p>
+      <details>
+        <summary class="cursor-pointer text-sm font-medium text-primary">
+          New York income adjustments and itemized deductions
+        </summary>
+        <div class="mt-4 grid gap-4 sm:grid-cols-3">
+          <UFormField
+            v-for="field in newYorkFields"
+            :key="field.key"
+            :label="field.label"
+            :description="field.description"
+          >
+            <UInput
+              :model-value="formatNumberInput(newYorkInputs[field.key])"
+              inputmode="decimal"
+              class="w-full"
+              :aria-label="field.label"
+              @update:model-value="newYorkInputs[field.key] = parseNumberInput($event)"
+            />
+          </UFormField>
+        </div>
+      </details>
+    </section>
+
+    <UAlert
+      v-if="selectedState !== 'NY' && stateRulesYear !== selectedYear"
+      class="mb-6"
+      color="warning"
+      variant="soft"
+      icon="i-lucide-info"
+      :title="`Provisional ${selectedYear} state estimate`"
+      :description="selectedState === 'MA'
+        ? `The Massachusetts surtax threshold defaults to the ${stateRulesYear} amount until the ${selectedYear} threshold is published. You can override it in Advanced Configurations.`
+        : `California uses ${stateRulesYear} brackets, the standard deduction, and the exemption credit until ${selectedYear} figures are published.`"
+    />
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div class="space-y-6">
@@ -1034,12 +1093,12 @@ const importInputs = async (event: Event) => {
             <div>
               <div class="mb-3 flex items-center justify-between gap-3">
                 <h3 class="text-sm font-semibold text-highlighted">
-                  Federal Tax Brackets
+                  {{ selectedYear }} Federal Tax Brackets
                 </h3>
 
                 <div class="flex items-center gap-2">
                   <UButton
-                    label="Reset"
+                    label="Reset to year defaults"
                     icon="i-lucide-rotate-ccw"
                     color="neutral"
                     variant="ghost"
@@ -1319,11 +1378,23 @@ const importInputs = async (event: Event) => {
 
                 <div>
                   <dt class="text-sm font-medium text-muted">
-                    State Tax
+                    {{ selectedState === 'NY' ? 'New York State Tax' : 'State Tax' }}
                   </dt>
                   <dd class="mt-1 text-xl font-semibold text-highlighted">
                     {{ formatCurrency(calculationResults.stateTax) }}
                   </dd>
+                </div>
+
+                <div v-if="selectedState === 'NY' && nycResident">
+                  <dt class="text-sm font-medium text-muted">
+                    NYC Resident Tax
+                  </dt>
+                  <dd class="mt-1 text-xl font-semibold text-highlighted">
+                    {{ formatCurrency(calculationResults.cityTax) }}
+                  </dd>
+                  <p class="mt-1 text-xs text-muted">
+                    Includes {{ formatCurrency(calculationResults.cityTaxCredits) }} in modeled NYC credits. A negative tax represents refundable credits.
+                  </p>
                 </div>
 
                 <div>
