@@ -1,18 +1,21 @@
+import { isProvisionalStateEstimate, resolveTaxState, stateOptions } from '../../../shared/utils/tax-states'
 import { calculateCoreResults, type CalculatePayload } from '../../utils/income-tax'
-import { getTaxYearRules, resolveTaxYear } from '../../../shared/utils/tax-years'
+import { resolveTaxYear } from '../../../shared/utils/tax-years'
 
 const locations = [
-  { id: 'MA', label: 'Massachusetts', taxState: 'MA', nycResident: false },
-  { id: 'CA', label: 'California', taxState: 'CA', nycResident: false },
-  { id: 'NY', label: 'New York outside NYC', taxState: 'NY', nycResident: false },
+  ...stateOptions.map(({ label, value }) => ({
+    id: value,
+    label: value === 'NY' ? 'New York outside NYC' : label,
+    taxState: value,
+    nycResident: false
+  })),
   { id: 'NYC', label: 'New York City', taxState: 'NY', nycResident: true }
 ] as const
 
 export default defineEventHandler(async (event) => {
   const scenario = await readBody<CalculatePayload>(event) ?? {}
   const taxYear = resolveTaxYear(scenario.taxYear)
-  const sourceState = scenario.taxState === 'CA' || scenario.taxState === 'NY' ? scenario.taxState : 'MA'
-  const stateRulesYear = getTaxYearRules(taxYear).stateRulesYear
+  const sourceState = resolveTaxState(scenario.taxState)
 
   const rows = locations.map((location) => {
     const sameState = sourceState === location.taxState
@@ -40,7 +43,7 @@ export default defineEventHandler(async (event) => {
       id: location.id,
       label: location.label,
       isCalculatorLocation,
-      provisional: location.taxState !== 'NY' && stateRulesYear !== taxYear,
+      provisional: isProvisionalStateEstimate(location.taxState, taxYear),
       incomeExcludingBenefits: results.incomeExcludingBenefits,
       federalTax: results.federalTax + results.longTermTax + results.netInvestmentIncomeTax,
       payrollTax: results.ficaTax,
@@ -54,5 +57,5 @@ export default defineEventHandler(async (event) => {
     }
   })
 
-  return { taxYear, stateRulesYear, rows }
+  return { taxYear, rows }
 })

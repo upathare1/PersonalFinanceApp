@@ -1,4 +1,4 @@
-import type { TaxYear } from '../../shared/utils/tax-years'
+import { newYorkBracketStarts, newYorkCityBrackets, newYorkStateSchedules, type TaxYear } from '../../shared/utils/tax-years'
 
 export interface NewYorkInputs {
   additions?: number
@@ -6,20 +6,13 @@ export interface NewYorkInputs {
   itemizedDeduction?: number
 }
 
-const starts = [0, 8500, 11700, 13900, 80650, 215400, 1077550, 5000000, 25000000]
-const schedules = {
-  2025: { rates: [4, 4.5, 5.25, 5.5, 6, 6.85, 9.65, 10.3, 10.9], bases: [0, 340, 484, 600, 4271, 12356, 71413, 449929, 2509929], recapture: [568, 1831, 2399, 32571] },
-  2026: { rates: [3.9, 4.4, 5.15, 5.4, 5.9, 6.85, 9.65, 10.3, 10.9], bases: [0, 332, 473, 586, 4191, 12141, 71198, 449714, 2509714], recapture: [567, 2047, 2614, 32786] },
-  2027: { rates: [3.8, 4.3, 5.05, 5.3, 5.8, 6.85, 9.65, 10.3, 10.9], bases: [0, 323, 461, 572, 4110, 11926, 70983, 449499, 2509499], recapture: [568, 2261, 2829, 33001] }
-}
-
 // NY Tax Law §601(c), (d-4), (d-5), (d-6); 2025 IT-201-I and 2026 IT-2105-I.
 // Official schedules use rounded base amounts. Do not reconstruct them by summing bands.
 export function newYorkStateTaxBeforeCredits(year: TaxYear, agi: number, taxable: number) {
-  const schedule = schedules[year]
-  const index = starts.findLastIndex(from => taxable > from)
+  const schedule = newYorkStateSchedules[year]
+  const index = newYorkBracketStarts.findLastIndex(from => taxable > from)
   const band = Math.max(0, index)
-  const baseTax = schedule.bases[band]! + Math.max(0, taxable - starts[band]!) * schedule.rates[band]! / 100
+  const baseTax = schedule.bases[band]! + Math.max(0, taxable - newYorkBracketStarts[band]!) * schedule.rates[band]! / 100
   const phase = (floor: number) => Math.round(Math.min(1, Math.max(0, (agi - floor) / 50000)) * 10000) / 10000
   if (agi <= 107650) return baseTax
   if (agi > 25000000) return taxable * 0.109
@@ -52,13 +45,8 @@ export function calculateNewYorkTaxes(year: TaxYear, federalAgi: number, exemptI
   let cityTaxCredits = 0
   if (nycResident) {
     // Full-year, single, not claimable as a dependent. NYC credits: IT-201 lines 48, 69 and 69a.
-    const cityBaseTax = taxableIncome <= 12000
-      ? taxableIncome * 0.03078
-      : taxableIncome <= 25000
-        ? 369 + (taxableIncome - 12000) * 0.03762
-        : taxableIncome <= 50000
-          ? 858 + (taxableIncome - 25000) * 0.03819
-          : 1813 + (taxableIncome - 50000) * 0.03876
+    const cityBracket = newYorkCityBrackets.findLast(bracket => taxableIncome > bracket.from) ?? newYorkCityBrackets[0]!
+    const cityBaseTax = cityBracket.base + (taxableIncome - cityBracket.from) * (cityBracket.ratePercent / 100)
     const household = federalAgi <= 10000 ? 15 : federalAgi <= 12500 ? 10 : 0
     const fixedSchoolCredit = federalAgi <= 250000 ? 63 : 0
     const rateReduction = taxableIncome > 500000

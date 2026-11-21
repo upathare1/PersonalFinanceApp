@@ -9,6 +9,7 @@ const pending = ref(true)
 const failed = ref(false)
 const retry = ref(0)
 const selectedId = ref<Location['id']>()
+const locationSearch = ref('')
 const baselineId = ref<Location['id']>()
 
 watch([() => props.scenario, retry], async (_, __, onCleanup) => {
@@ -42,7 +43,15 @@ const outflowCategories = categories.filter(({ key }) => key !== 'netIncome')
 const rows = computed(() => [...(comparison.value?.rows ?? [])].sort((a, b) => b.netIncome - a.netIncome))
 const baseline = computed(() => rows.value.find(row => row.id === baselineId.value) ?? rows.value.find(row => row.isCalculatorLocation))
 const selected = computed(() => rows.value.find(row => row.id === selectedId.value) ?? baseline.value)
-const baselineOptions = computed(() => rows.value.map(row => ({ label: row.label, value: row.id })))
+const locationOptions = computed(() => [...rows.value]
+  .sort((a, b) => a.label.localeCompare(b.label))
+  .map(row => ({ label: row.label, value: row.id })))
+const visibleRows = computed(() => {
+  const query = locationSearch.value.trim().toLowerCase()
+  return query
+    ? rows.value.filter(row => row.label.toLowerCase().includes(query) || row.id.toLowerCase() === query)
+    : rows.value
+})
 const baselineSelection = computed({
   get: () => baseline.value?.id,
   set: (value) => { baselineId.value = value }
@@ -119,12 +128,29 @@ function dismissDonutTooltip() {
             {{ comparison.taxYear }} income breakdown
           </h2>
           <p class="mt-1 text-sm text-muted">
-            Select a location to see its taxes and deductions.
+            {{ rows.length }} locations ranked by estimated Net Income. Select one for its tax and deduction breakdown.
           </p>
 
-          <div class="mt-4 space-y-2">
+          <UInput
+            v-model="locationSearch"
+            class="mt-4 w-full"
+            icon="i-lucide-search"
+            placeholder="Find a state or New York City"
+            aria-label="Filter comparison locations"
+          />
+          <p
+            v-if="!visibleRows.length"
+            class="mt-4 text-sm text-muted"
+          >
+            No locations match your search.
+          </p>
+          <div
+            v-else
+            class="mt-3 max-h-[36rem] space-y-2 overflow-y-auto overscroll-contain"
+            aria-label="Ranked location comparisons"
+          >
             <button
-              v-for="row in rows"
+              v-for="row in visibleRows"
               :key="row.id"
               type="button"
               :aria-pressed="selected.id === row.id"
@@ -278,11 +304,16 @@ function dismissDonutTooltip() {
 
           <div class="mt-5 space-y-2 border-t border-default pt-4">
             <UFormField label="Compare Net Income against">
-              <USelect
+              <USelectMenu
                 v-model="baselineSelection"
-                :items="baselineOptions"
+                :items="locationOptions"
+                value-key="value"
                 aria-label="Compare Net Income against"
                 class="w-full"
+                :ui="{
+                  value: 'min-w-0 overflow-visible text-clip whitespace-normal text-left',
+                  itemLabel: 'min-w-0 overflow-visible text-clip whitespace-normal'
+                }"
               />
             </UFormField>
             <p
@@ -295,11 +326,14 @@ function dismissDonutTooltip() {
         </section>
       </div>
 
+      <p class="text-sm text-muted">
+        Includes state income taxes and the NYC resident tax. Washington estimates its capital-gains excise tax using the long-term gains input unless you specify an eligible amount in Calculator.
+      </p>
       <p
         v-if="rows.some(row => row.provisional)"
         class="text-sm text-muted"
       >
-        Massachusetts and California use provisional state estimates based on {{ comparison.stateRulesYear }} rules.
+        Provisional state estimates may use earlier figures or preliminary schedules for amounts still subject to change.
       </p>
     </template>
   </section>

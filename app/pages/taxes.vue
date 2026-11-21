@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { createCalculatorConfig, defaultTaxYear, getTaxYearRules, resolveTaxYear, taxYears, type CalculatorConfig, type TaxYear } from '#shared/utils/tax-years'
+import { isProvisionalStateEstimate, resolveTaxState, stateOptions, taxStates, type TaxState } from '#shared/utils/tax-states'
+import { getStateSchedule } from '#shared/utils/state-income-tax-rules'
+import { californiaBehavioralHealthTax, createCalculatorConfig, defaultTaxYear, getTaxYearRules, massachusettsIncomeTaxRates, newYorkBracketStarts, newYorkCityBrackets, newYorkStateSchedules, resolveTaxYear, taxYears, type CalculatorConfig, type TaxYear } from '#shared/utils/tax-years'
 
 type IncomeKey
   = | 'wageIncome'
@@ -21,8 +23,6 @@ type OptionalDeductionKey
     | 'investmentExpenses'
     | 'massachusettsRent'
     | 'carryOverCapitalLoss'
-
-type TaxState = 'MA' | 'CA' | 'NY'
 
 interface IncomeInput {
   key: IncomeKey
@@ -52,6 +52,7 @@ type NumberInputValue = string | number
 interface CalculationPayload {
   taxYear: TaxYear
   taxState: TaxState
+  washingtonEligibleGains?: number
   nycResident: boolean
   newYorkInputs: { additions: number, subtractions: number, itemizedDeduction: number }
   income: Record<IncomeKey, number | undefined>
@@ -193,12 +194,6 @@ const optionalDeductionInputs: OptionalDeductionInput[] = [
   }
 ]
 
-const stateOptions = [
-  { label: 'Massachusetts', value: 'MA' },
-  { label: 'California', value: 'CA' },
-  { label: 'New York', value: 'NY' }
-]
-
 const income = reactive<Record<IncomeKey, number | undefined>>({
   wageIncome: undefined,
   taxableBenefits: undefined,
@@ -235,13 +230,29 @@ const calculatorConfig = computed(() => configsByYear[selectedYear.value])
 
 const selectedState = ref<TaxState>('MA')
 const nycResident = ref(false)
+const washingtonEligibleGains = ref<number>()
 const newYorkInputs = reactive({ additions: 0, subtractions: 0, itemizedDeduction: 0 })
 const newYorkFields = [
   { key: 'additions' as const, label: 'New York additions to income', description: 'Taxable NY additions not included above, such as other-state municipal bond interest.' },
   { key: 'subtractions' as const, label: 'New York subtractions from income', description: 'Eligible NY subtractions not already entered, such as qualifying pension income. Do not repeat state-exempt interest.' },
   { key: 'itemizedDeduction' as const, label: 'New York itemized deduction (after limits)', description: 'Optional: enter your total allowable IT-196 deduction after all NY limits. Otherwise the $8,000 standard deduction applies. Federal mortgage/property tax entries do not automatically populate this total.' }
 ]
-const selectedStateName = computed(() => stateOptions.find(state => state.value === selectedState.value)!.label)
+const selectedStateName = computed(() => taxStates[selectedState.value])
+const selectedStateBrackets = computed<readonly (readonly [number, number])[] | undefined>(() => {
+  switch (selectedState.value) {
+    case 'MA':
+      return [
+        [0, massachusettsIncomeTaxRates.base],
+        [Math.max(calculatorConfig.value.massachusettsSurtaxFloor, 0) || getTaxYearRules(selectedYear.value).massachusettsSurtaxFloor, massachusettsIncomeTaxRates.aboveSurtaxFloor]
+      ]
+    case 'CA':
+      return getTaxYearRules(selectedYear.value).california.brackets.map(({ from, ratePercent }) => [from, ratePercent])
+    case 'NY':
+      return newYorkStateSchedules[selectedYear.value].rates.map((rate, index) => [newYorkBracketStarts[index]!, rate])
+    default:
+      return getStateSchedule(selectedState.value, selectedYear.value)?.brackets
+  }
+})
 const interestBreakdownExpanded = ref(false)
 const hsaBreakdownExpanded = ref(false)
 const optionalDeductionsExpanded = ref(false)
@@ -408,6 +419,7 @@ const taxViews = [
 const calculationPayload = computed<CalculationPayload>(() => ({
   taxYear: selectedYear.value,
   taxState: selectedState.value,
+  washingtonEligibleGains: washingtonEligibleGains.value,
   nycResident: selectedState.value === 'NY' && nycResident.value,
   newYorkInputs: { ...newYorkInputs },
   income: { ...income },
@@ -432,12 +444,14 @@ const calculationPayload = computed<CalculationPayload>(() => ({
 const stateTaxInputSignature = computed(() => JSON.stringify({
   taxYear: selectedYear.value,
   taxState: selectedState.value,
+  washingtonEligibleGains: washingtonEligibleGains.value,
   nycResident: selectedState.value === 'NY' && nycResident.value,
   newYorkInputs: { ...newYorkInputs },
   income: { ...income },
   adjustments: { ...adjustments },
   deductions: {
     mortgageInterest: optionalDeductions.mortgageInterest,
+    propertyTaxes: optionalDeductions.propertyTaxes,
     investmentExpenses: optionalDeductions.investmentExpenses,
     massachusettsRent: optionalDeductions.massachusettsRent,
     carryOverCapitalLoss: optionalDeductions.carryOverCapitalLoss
@@ -494,6 +508,7 @@ const exportInputs = () => {
     taxYear: selectedYear.value,
     exportedAt: new Date().toISOString(),
     taxState: selectedState.value,
+    washingtonEligibleGains: washingtonEligibleGains.value,
     nycResident: selectedState.value === 'NY' && nycResident.value,
     newYorkInputs: { ...newYorkInputs },
     income: { ...income },
@@ -537,7 +552,8 @@ const importInputs = async (event: Event) => {
   try {
     const importedData = JSON.parse(await file.text()) as {
       taxYear?: unknown
-      taxState?: TaxState
+      taxState?: unknown
+      washingtonEligibleGains?: number
       nycResident?: boolean
       newYorkInputs?: Partial<typeof newYorkInputs>
       income?: Partial<Record<IncomeKey, number>>
@@ -555,7 +571,10 @@ const importInputs = async (event: Event) => {
     }
 
     selectedYear.value = resolveTaxYear(importedData.taxYear)
-    selectedState.value = importedData.taxState === 'NY' ? 'NY' : importedData.taxState === 'CA' ? 'CA' : 'MA'
+    selectedState.value = resolveTaxState(importedData.taxState)
+    washingtonEligibleGains.value = importedData.washingtonEligibleGains === undefined
+      ? undefined
+      : normalizeAmount(importedData.washingtonEligibleGains)
     nycResident.value = selectedState.value === 'NY' && importedData.nycResident === true
     for (const field of newYorkFields) {
       newYorkInputs[field.key] = normalizeAmount(importedData.newYorkInputs?.[field.key])
@@ -629,7 +648,7 @@ const importInputs = async (event: Event) => {
             </p>
           </div>
 
-          <div class="grid w-full shrink-0 grid-cols-2 gap-3 sm:w-80">
+          <div class="grid w-full shrink-0 grid-cols-1 gap-3 min-[420px]:grid-cols-[6.5rem_minmax(0,1fr)] sm:w-[23rem]">
             <UFormField
               label="Tax year"
               name="taxYear"
@@ -648,13 +667,17 @@ const importInputs = async (event: Event) => {
               label="State of residence"
               name="taxState"
             >
-              <USelect
+              <USelectMenu
                 v-model="selectedState"
                 :items="stateOptions"
                 value-key="value"
                 size="xl"
                 class="w-full"
                 aria-label="State of residence"
+                :ui="{
+                  value: 'min-w-0 overflow-visible text-clip whitespace-normal text-left',
+                  itemLabel: 'min-w-0 overflow-visible text-clip whitespace-normal'
+                }"
               />
             </UFormField>
           </div>
@@ -697,7 +720,7 @@ const importInputs = async (event: Event) => {
         </section>
 
         <UAlert
-          v-if="selectedState !== 'NY' && stateRulesYear !== selectedYear"
+          v-if="isProvisionalStateEstimate(selectedState, selectedYear)"
           class="mb-6"
           color="warning"
           variant="soft"
@@ -705,8 +728,78 @@ const importInputs = async (event: Event) => {
           :title="`Provisional ${selectedYear} state estimate`"
           :description="selectedState === 'MA'
             ? `The Massachusetts surtax threshold defaults to the ${stateRulesYear} amount until the ${selectedYear} threshold is published. You can override it in Advanced Configurations.`
-            : `California uses ${stateRulesYear} brackets, the standard deduction, and the exemption credit until ${selectedYear} figures are published.`"
+            : `Some ${selectedYear} state figures use prior-year values, preliminary schedules, or published estimates.`"
         />
+
+        <section
+          v-if="selectedState === 'WA'"
+          class="mb-6 rounded-lg border border-default p-5"
+          aria-label="Washington capital gains"
+        >
+          <UFormField
+            label="Long-term gains taxable in Washington before the state deduction"
+            description="Leave blank to use the full long-term gains input. Enter the eligible amount if it includes qualified dividends or exempt gains such as real estate. Enter 0 when none of it qualifies."
+          >
+            <UInput
+              :model-value="washingtonEligibleGains === undefined ? '' : formatNumberInput(washingtonEligibleGains)"
+              inputmode="decimal"
+              class="w-full max-w-xs"
+              aria-label="Long-term gains taxable in Washington before the state deduction"
+              @update:model-value="washingtonEligibleGains = parseOptionalNumberInput($event)"
+            />
+          </UFormField>
+        </section>
+
+        <details
+          v-if="selectedStateBrackets"
+          class="mb-6 rounded-lg border border-default p-4"
+        >
+          <summary class="cursor-pointer text-sm font-medium text-primary">
+            {{ selectedStateName }} state income tax rates
+          </summary>
+          <dl class="mt-3 grid max-w-md grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
+            <template
+              v-for="[from, rate] in selectedStateBrackets"
+              :key="from"
+            >
+              <dt>{{ ['MA', 'CA', 'NY'].includes(selectedState) ? 'Taxable income' : 'Income' }} over {{ formatCurrency(from) }}</dt>
+              <dd class="text-right tabular-nums">
+                {{ rate }}%
+              </dd>
+            </template>
+          </dl>
+          <p
+            v-if="selectedState === 'CA'"
+            class="mt-3 text-sm text-muted"
+          >
+            California adds a {{ californiaBehavioralHealthTax.ratePercent }}% Behavioral Health Services Tax on taxable income over {{ formatCurrency(californiaBehavioralHealthTax.from) }}.
+          </p>
+          <p
+            v-if="selectedState === 'NY'"
+            class="mt-3 text-sm text-muted"
+          >
+            New York State's tax-benefit recapture can increase the tax calculated from these brackets.
+          </p>
+          <template v-if="selectedState === 'NY' && nycResident">
+            <h3 class="mt-4 text-sm font-medium text-highlighted">
+              New York City resident income tax rates
+            </h3>
+            <dl class="mt-2 grid max-w-md grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
+              <template
+                v-for="{ from, ratePercent } in newYorkCityBrackets"
+                :key="from"
+              >
+                <dt>Taxable income over {{ formatCurrency(from) }}</dt>
+                <dd class="text-right tabular-nums">
+                  {{ ratePercent }}%
+                </dd>
+              </template>
+            </dl>
+          </template>
+          <p class="mt-3 text-sm text-muted">
+            State-specific deductions and credits can affect the estimate. Local income taxes outside NYC and separate state payroll charges are excluded.
+          </p>
+        </details>
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div class="space-y-6">

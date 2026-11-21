@@ -1,5 +1,7 @@
+import { resolveTaxState, type TaxState } from '../../shared/utils/tax-states'
+import { calculateOtherStateTax } from './other-state-tax'
 import { calculateNewYorkTaxes, type NewYorkInputs } from './new-york-tax'
-import { createCalculatorConfig, getTaxYearRules, resolveTaxYear } from '../../shared/utils/tax-years'
+import { californiaBehavioralHealthTax, createCalculatorConfig, getTaxYearRules, massachusettsIncomeTaxRates, resolveTaxYear } from '../../shared/utils/tax-years'
 
 interface IncomePayload {
   wageIncome?: number
@@ -48,11 +50,10 @@ interface CalculatorConfigPayload {
   federalTaxBrackets?: ConfigTaxBracketPayload[]
 }
 
-type TaxState = 'MA' | 'CA' | 'NY'
-
 export interface CalculatePayload {
   taxYear?: unknown
   taxState?: TaxState
+  washingtonEligibleGains?: number
   nycResident?: boolean
   newYorkInputs?: NewYorkInputs
   income?: IncomePayload
@@ -129,7 +130,7 @@ export const calculateCoreResults = (
   payload: CalculatePayload,
   deltas: MarginalIncomeDeltas = {}
 ): CoreCalculationResults => {
-  const taxState: TaxState = payload.taxState === 'NY' ? 'NY' : payload.taxState === 'CA' ? 'CA' : 'MA'
+  const taxState = resolveTaxState(payload.taxState)
   const income = payload.income ?? {}
   const adjustments = payload.adjustments ?? {}
   const optionalDeductions = payload.optionalDeductions ?? {}
@@ -259,19 +260,16 @@ export const calculateCoreResults = (
     - stateTaxExemptInterest,
     0
   )
-  const newYork = calculateNewYorkTaxes(
-    taxYear,
-    Math.max(0, totalIncome - retirement401kContributions - hsaEmployeeContributionAmount
-    - healthInsurancePayments - federalCapitalLossDeduction - investmentExpenses),
-    stateTaxExemptInterest,
-    taxState === 'NY' && payload.nycResident === true,
-    payload.newYorkInputs
-  )
-  const stateTaxableIncome = taxState === 'NY'
-    ? newYork.taxableIncome
-    : taxState === 'CA'
-      ? californiaTaxableIncome
-      : massachusettsTaxableIncome
+  const newYork = taxState === 'NY'
+    ? calculateNewYorkTaxes(
+        taxYear,
+        Math.max(0, totalIncome - retirement401kContributions - hsaEmployeeContributionAmount
+        - healthInsurancePayments - federalCapitalLossDeduction - investmentExpenses),
+        stateTaxExemptInterest,
+        payload.nycResident === true,
+        payload.newYorkInputs
+      )
+    : undefined
   const federalTax = calculateProgressiveTax(federalOrdinaryIncome, federalTaxBrackets)
   const longTermTaxRate = federalOrdinaryIncome <= rules.federal.gainsZero
     ? 0
@@ -279,22 +277,52 @@ export const calculateCoreResults = (
       ? 0.15
       : 0.20
   const longTermTax = longTermTaxableIncome * longTermTaxRate
-  const massachusettsTax = Math.min(massachusettsTaxableIncome, massachusettsSurtaxFloor) * 0.05
-    + Math.max(massachusettsTaxableIncome - massachusettsSurtaxFloor, 0) * 0.09
+  const massachusettsTax = Math.min(massachusettsTaxableIncome, massachusettsSurtaxFloor) * (massachusettsIncomeTaxRates.base / 100)
+    + Math.max(massachusettsTaxableIncome - massachusettsSurtaxFloor, 0) * (massachusettsIncomeTaxRates.aboveSurtaxFloor / 100)
   const californiaIncomeTax = calculateProgressiveTax(
     californiaTaxableIncome,
     rules.california.brackets
   )
-  const californiaBehavioralHealthServicesTax = Math.max(californiaTaxableIncome - 1000000, 0) * 0.01
+  const californiaBehavioralHealthServicesTax = Math.max(californiaTaxableIncome - californiaBehavioralHealthTax.from, 0)
+    * (californiaBehavioralHealthTax.ratePercent / 100)
   const californiaTax = Math.max(
     californiaIncomeTax
     + californiaBehavioralHealthServicesTax
     - rules.california.exemptionCredit,
     0
   )
-  const stateTax = taxState === 'NY' ? newYork.stateTax : taxState === 'CA' ? californiaTax : massachusettsTax
-  const cityTax = taxState === 'NY' ? newYork.cityTax : 0
-  const cityTaxCredits = taxState === 'NY' ? newYork.cityTaxCredits : 0
+  const stateTaxesInFederalItemized = Math.min(stateTaxesWithholding, saltDeductionCap)
+  const stateResult = newYork ?? (taxState === 'CA'
+    ? { taxableIncome: californiaTaxableIncome, stateTax: californiaTax }
+    : taxState === 'MA'
+      ? { taxableIncome: massachusettsTaxableIncome, stateTax: massachusettsTax }
+      : calculateOtherStateTax({
+          state: taxState,
+          year: taxYear,
+          totalIncome,
+          retirement: retirement401kContributions,
+          healthInsurance: healthInsurancePayments,
+          employeeHsa: hsaEmployeeContributionAmount,
+          employerHsa: normalizeAmount(hsaBreakdown.employerContributions),
+          exemptInterest: Math.min(interestIncome, stateTaxExemptInterest),
+          capitalLoss: carryOverCapitalLoss,
+          longTermGains: longTermCapitalGains,
+          shortTermGains: shortTermCapitalGains,
+          netInvestmentIncome,
+          washingtonEligibleGains: payload.washingtonEligibleGains === undefined
+            ? undefined
+            : normalizeAmount(payload.washingtonEligibleGains),
+          federalStandard: defaults.federalStandardDeduction,
+          federalItemized: mortgageInterest + Math.min(stateAndPropertyTaxesPaid, saltDeductionCap),
+          stateTaxesInFederalItemized,
+          federalIncomeTax: federalTax + longTermTax,
+          ficaTax,
+          mortgageInterest,
+          propertyTaxes
+        }))
+  const { taxableIncome: stateTaxableIncome, stateTax } = stateResult
+  const cityTax = newYork?.cityTax ?? 0
+  const cityTaxCredits = newYork?.cityTaxCredits ?? 0
   const netInvestmentThresholdIncome = federalOrdinaryIncome
     + longTermTaxableIncome
     + interestIncome

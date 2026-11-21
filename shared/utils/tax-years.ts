@@ -39,6 +39,23 @@ const california = {
   2026: { standardDeduction: 5900, exemptionCredit: 158, brackets: brackets([11456, 27157, 42861, 59498, 75197, 384109, 460927, 768213], californiaRates) }
 }
 
+export const californiaBehavioralHealthTax = { from: 1000000, ratePercent: 1 }
+export const massachusettsIncomeTaxRates = { base: 5, aboveSurtaxFloor: 9 }
+
+export const newYorkBracketStarts = [0, 8500, 11700, 13900, 80650, 215400, 1077550, 5000000, 25000000]
+export const newYorkStateSchedules = {
+  2025: { rates: [4, 4.5, 5.25, 5.5, 6, 6.85, 9.65, 10.3, 10.9], bases: [0, 340, 484, 600, 4271, 12356, 71413, 449929, 2509929], recapture: [568, 1831, 2399, 32571] },
+  2026: { rates: [3.9, 4.4, 5.15, 5.4, 5.9, 6.85, 9.65, 10.3, 10.9], bases: [0, 332, 473, 586, 4191, 12141, 71198, 449714, 2509714], recapture: [567, 2047, 2614, 32786] },
+  2027: { rates: [3.8, 4.3, 5.05, 5.3, 5.8, 6.85, 9.65, 10.3, 10.9], bases: [0, 323, 461, 572, 4110, 11926, 70983, 449499, 2509499], recapture: [568, 2261, 2829, 33001] }
+}
+
+export const newYorkCityBrackets = [
+  { from: 0, base: 0, ratePercent: 3.078 },
+  { from: 12000, base: 369, ratePercent: 3.762 },
+  { from: 25000, base: 858, ratePercent: 3.819 },
+  { from: 50000, base: 1813, ratePercent: 3.876 }
+]
+
 const wageBase = { 2025: 176100, 2026: 184500, 2027: 192300 }
 const massachusettsSurtax = { 2025: 1083150, 2026: 1107750 }
 
